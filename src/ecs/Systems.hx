@@ -365,15 +365,6 @@ class IntentResolutionSystem implements ISystem {
                 // do nothing
         }
 
-        // 物理更新
-        pos.x += pos.vx * dt;
-        pos.y += pos.vy * dt;
-        pos.vx *= 0.85;
-        pos.vy *= 0.85;
-
-        // 边界
-        pos.x = Math.clamp(pos.x, 0, world.worldWidth);
-        pos.y = Math.clamp(pos.y, 0, world.worldHeight);
     }
 
     // --- 意图冲突仲裁 ---

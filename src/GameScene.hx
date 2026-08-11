@@ -873,12 +873,19 @@ class GameScene extends Scene {
     function handleInput(dt:Float) {
         var pos = playerEntity.get(PositionComp);
         if (pos == null) return;
-        var speed = 200 * dt;
+        var speed = 350; // pixels per second
 
-        if (Key.isDown(Key.W) || Key.isDown(Key.UP)) pos.vy -= speed * 10;
-        if (Key.isDown(Key.S) || Key.isDown(Key.DOWN)) pos.vy += speed * 10;
-        if (Key.isDown(Key.A) || Key.isDown(Key.LEFT)) pos.vx -= speed * 10;
-        if (Key.isDown(Key.D) || Key.isDown(Key.RIGHT)) pos.vx += speed * 10;
+        // 玩家移动: 直接更新位置(实时响应, 不等 tick)
+        pos.vx = 0;
+        pos.vy = 0;
+        if (Key.isDown(Key.W) || Key.isDown(Key.UP)) pos.vy -= speed;
+        if (Key.isDown(Key.S) || Key.isDown(Key.DOWN)) pos.vy += speed;
+        if (Key.isDown(Key.A) || Key.isDown(Key.LEFT)) pos.vx -= speed;
+        if (Key.isDown(Key.D) || Key.isDown(Key.RIGHT)) pos.vx += speed;
+        pos.x += pos.vx * dt;
+        pos.y += pos.vy * dt;
+        pos.x = hxd.Math.clamp(pos.x, 0, engine.worldWidth);
+        pos.y = hxd.Math.clamp(pos.y, 0, engine.worldHeight);
 
         if (Key.isPressed(Key.Q)) castSpell("fireball", 30, 1.5);
         if (Key.isPressed(Key.E)) castSpell("ice", 35, 1.8);

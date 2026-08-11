@@ -19,6 +19,8 @@ class Main extends App {
 
         // 创建支持中文的字体并替换默认字体
         #if js
+        // 暴露到全局便于调试
+        untyped js.Browser.window.Main = Main;
         try {
             cjkFont = FontBuilder.getFont("Microsoft YaHei", 14, { chars: getCJKChars() });
             @:privateAccess h3d.Engine.getCurrent().resCache.set(hxd.res.DefaultFont, cjkFont);

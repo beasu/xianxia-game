@@ -6,3 +6,4 @@
 -main Main
 -js bin/xianxia.js
 -D js-es=6
+-D expose=com.xianxia

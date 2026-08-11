@@ -161,6 +161,24 @@ class WorldEngine {
             }
         }
 
+        // === 全局物理积分: 对所有 NPC 实体统一更新位置 ===
+        // (玩家位置由 handleInput 每帧直接更新, 跳过 tick 物理)
+        for (e in entities) {
+            if (!e.alive) continue;
+            if (e.isPlayer) continue;
+            var pos = e.get(PositionComp);
+            if (pos == null) continue;
+
+            pos.x += pos.vx * tickRate;
+            pos.y += pos.vy * tickRate;
+            pos.vx *= 0.85;
+            pos.vy *= 0.85;
+
+            // 边界
+            pos.x = Math.clamp(pos.x, 0, worldWidth);
+            pos.y = Math.clamp(pos.y, 0, worldHeight);
+        }
+
         // 生成快照
         if (tickCount % 5 == 0) {
             lastSnapshot = generateSnapshot();
