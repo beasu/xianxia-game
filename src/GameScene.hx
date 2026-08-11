@@ -98,6 +98,15 @@ class GameScene extends Scene {
     // --- 技能冷却 ---
     public var cooldowns:Map<String, Float> = [];
 
+    // --- 法术目标选择系统 ---
+    // 按下技能键后进入瞄准模式, 左键选择释放位置, Tab 自动锁定最近敌人
+    var pendingSpell:String = null;       // 待释放的法术ID (null=未在瞄准)
+    var pendingSpellMpCost:Int = 0;       // 待释放法术的灵力消耗
+    var pendingSpellCd:Float = 0;         // 待释放法术的冷却时间
+    var targetingTimer:Float = 0;         // 瞄准模式超时计时(秒, 0=未在瞄准)
+    var targetingMaxTime:Float = 3.0;     // 瞄准模式最大持续时间
+    var targetingIndicator:h2d.Graphics;  // 瞄准指示器(范围圈)
+
     // --- 玩家引用(渲染对象) ---
     public var player:Cultivator;
     public var playerEntity:Entity;
@@ -145,6 +154,10 @@ class GameScene extends Scene {
         formationLayer = new Object(worldCamera);
         entityLayer = new Object(worldCamera);
         fxLayer = new Object(worldCamera);
+
+        // 法术瞄准指示器(默认隐藏)
+        targetingIndicator = new h2d.Graphics(worldCamera);
+        targetingIndicator.visible = false;
 
         // UI 层直接挂在 Scene 下, 不受镜头移动影响
         uiLayer = new Object(this);
@@ -563,7 +576,7 @@ class GameScene extends Scene {
 
         // === 提示 ===
         uiInfo = new Label();
-        uiInfo.text = "WASD移动 | Q-P法术 | 1-5阵法\n世界自运转中...";
+        uiInfo.text = "WASD移动 | 空格普攻 | Q-P法术(左键瞄准/Tab锁定) | 1-5阵法\n左键=普攻/确认施法 | Tab=锁定敌人 | 右键=取消";
         uiInfo.styleString = "font-size:12px;color:#888888;";
         uiInfo.left = width - 210;
         uiInfo.top = height - 80;
@@ -584,50 +597,184 @@ class GameScene extends Scene {
     }
 
     // ============================================================
-    //  玩家法术: 通过 PlayerCommand 提交给世界引擎
+    //  法术目标选择系统
+    //  按键/点击技能按钮 -> 进入瞄准模式 -> 左键选择释放位置 / Tab锁定最近敌人
     // ============================================================
+
     public function castSpell(skillId:String, mpCost:Int, cdTime:Float) {
         var cdKey = skillId;
-        if (cooldowns.exists(cdKey) && cooldowns[cdKey] > 0) return;
-
-        var cult = playerEntity.get(CultivationComp);
-        if (cult.mp < mpCost) { flashInfo("灵力不足!"); return; }
-
-        cult.mp -= mpCost;
-        cooldowns[cdKey] = cdTime;
-
-        var pos = playerEntity.get(PositionComp);
-        var mx = camMouseX;
-        var my = camMouseY;
-
-        // 法术特效仍然在渲染层执行
-        switch (skillId) {
-            case "fireball": SpellSystem.castFireball(pos.x, pos.y, mx, my, fxLayer, this);
-            case "thunder": SpellSystem.castThunder(pos.x, pos.y, mx, my, fxLayer, this);
-            case "ice": SpellSystem.castIce(pos.x, pos.y, mx, my, fxLayer, this);
-            case "swordqi": SpellSystem.castSwordQi(pos.x, pos.y, mx, my, fxLayer, this);
-            case "thunderstorm": SpellSystem.castThunderstorm(mx, my, fxLayer, this);
-            case "pocket": SpellSystem.castPocketDimension(pos.x, pos.y, mx, my, fxLayer, this);
-            case "lotus": SpellSystem.castLotusBloom(pos.x, pos.y, mx, my, fxLayer, this);
-            case "bigdipper": SpellSystem.castBigDipper(pos.x, pos.y, mx, my, fxLayer, this);
-            case "clone": SpellSystem.castShadowClone(pos.x, pos.y, mx, my, fxLayer, this);
-            case "voidshift": SpellSystem.castVoidShift(pos.x, pos.y, mx, my, fxLayer, this);
+        if (cooldowns.exists(cdKey) && cooldowns[cdKey] > 0) {
+            flashInfo("技能冷却中...");
+            return;
         }
 
-        // 查找法术范围内的敌人实体, 对其造成伤害
+        var cult = playerEntity.get(CultivationComp);
+        if (cult.mp < mpCost) {
+            flashInfo("灵力不足!");
+            return;
+        }
+
+        // 进入瞄准模式
+        pendingSpell = skillId;
+        pendingSpellMpCost = mpCost;
+        pendingSpellCd = cdTime;
+        targetingTimer = targetingMaxTime;
+        targetingIndicator.visible = true;
+        flashInfo("选择释放位置 (左键确认 / Tab锁定最近敌人 / 右键取消)");
+    }
+
+    // 取消瞄准
+    function cancelTargeting() {
+        pendingSpell = null;
+        targetingTimer = 0;
+        targetingIndicator.visible = false;
+    }
+
+    // 更新瞄准指示器: 在鼠标位置画法术范围圈
+    function updateTargetingIndicator() {
+        if (pendingSpell == null) return;
+        var spellType = getSpellType(pendingSpell);
+        var spellRange = getSpellRange(pendingSpell);
+
+        var pos = playerEntity.get(PositionComp);
+        // self 类型法术: 指示器画在玩家位置
+        var cx = (spellType == "self") ? pos.x : camMouseX;
+        var cy = (spellType == "self") ? pos.y : camMouseY;
+
+        // 法术颜色
+        var color = switch (pendingSpell) {
+            case "fireball": 0xff6600;
+            case "thunder": 0x66aaff;
+            case "ice": 0x88ddff;
+            case "swordqi": 0xeeeeff;
+            case "thunderstorm": 0xaa66ff;
+            case "pocket": 0xaa44ff;
+            case "lotus": 0xffdd00;
+            case "bigdipper": 0xddddaa;
+            case "clone": 0xaaaaaa;
+            case "voidshift": 0x66ffcc;
+            default: 0xffffff;
+        };
+
+        targetingIndicator.clear();
+        targetingIndicator.x = cx;
+        targetingIndicator.y = cy;
+
+        // 外圈: 法术范围
+        targetingIndicator.lineStyle(2, color, 0.8);
+        drawCircleOn(targetingIndicator, 0, 0, spellRange);
+        // 内圈填充(半透明)
+        targetingIndicator.beginFill(color, 0.1);
+        drawCircleOn(targetingIndicator, 0, 0, spellRange);
+        targetingIndicator.endFill();
+
+        // 中心十字准星
+        targetingIndicator.lineStyle(2, color, 1.0);
+        targetingIndicator.moveTo(-10, 0);
+        targetingIndicator.lineTo(10, 0);
+        targetingIndicator.moveTo(0, -10);
+        targetingIndicator.lineTo(0, 10);
+
+        // 倒计时弧线(指示剩余瞄准时间)
+        var ratio = targetingTimer / targetingMaxTime;
+        var arcSteps = 30;
+        targetingIndicator.lineStyle(3, color, 0.5);
+        targetingIndicator.moveTo(spellRange + 8, 0);
+        for (i in 0...arcSteps + 1) {
+            var a = (i / arcSteps) * Math.PI * 2 * ratio;
+            var px = Math.cos(a) * (spellRange + 8);
+            var py = Math.sin(a) * (spellRange + 8);
+            targetingIndicator.lineTo(px, py);
+        }
+    }
+
+    // 在 Graphics 上画圆(Heaps 的 drawCircle 不一定可用, 手动画)
+    function drawCircleOn(g:h2d.Graphics, cx:Float, cy:Float, r:Float) {
+        var steps = 32;
+        g.moveTo(cx + r, cy);
+        for (i in 1...steps + 1) {
+            var a = (i / steps) * Math.PI * 2;
+            g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+        }
+    }
+
+    // 确认释放法术到指定坐标
+    function executeSpellCast(targetX:Float, targetY:Float) {
+        if (pendingSpell == null) return;
+
+        var skillId = pendingSpell;
+        var mpCost = pendingSpellMpCost;
+        var cdTime = pendingSpellCd;
+
+        // 再次检查冷却和灵力(瞄准期间可能状态变化)
+        var cult = playerEntity.get(CultivationComp);
+        if (cult.mp < mpCost) {
+            flashInfo("灵力不足!");
+            cancelTargeting();
+            return;
+        }
+        if (cooldowns.exists(skillId) && cooldowns[skillId] > 0) {
+            flashInfo("技能冷却中...");
+            cancelTargeting();
+            return;
+        }
+
+        cult.mp -= mpCost;
+        cooldowns[skillId] = cdTime;
+
+        var pos = playerEntity.get(PositionComp);
+        var spellType = getSpellType(skillId);
+        var spellRange = getSpellRange(skillId);
+
+        // 确定法术释放的目标坐标
+        var aimX:Float = targetX;
+        var aimY:Float = targetY;
+        if (spellType == "self") {
+            // 以自身为中心的法术, 忽略鼠标位置
+            aimX = pos.x;
+            aimY = pos.y;
+        }
+
+        // 法术特效在渲染层执行
+        switch (skillId) {
+            case "fireball": SpellSystem.castFireball(pos.x, pos.y, aimX, aimY, fxLayer, this);
+            case "thunder": SpellSystem.castThunder(pos.x, pos.y, aimX, aimY, fxLayer, this);
+            case "ice": SpellSystem.castIce(pos.x, pos.y, aimX, aimY, fxLayer, this);
+            case "swordqi": SpellSystem.castSwordQi(pos.x, pos.y, aimX, aimY, fxLayer, this);
+            case "thunderstorm": SpellSystem.castThunderstorm(aimX, aimY, fxLayer, this);
+            case "pocket": SpellSystem.castPocketDimension(pos.x, pos.y, aimX, aimY, fxLayer, this);
+            case "lotus": SpellSystem.castLotusBloom(pos.x, pos.y, aimX, aimY, fxLayer, this);
+            case "bigdipper": SpellSystem.castBigDipper(pos.x, pos.y, aimX, aimY, fxLayer, this);
+            case "clone": SpellSystem.castShadowClone(pos.x, pos.y, aimX, aimY, fxLayer, this);
+            case "voidshift": SpellSystem.castVoidShift(pos.x, pos.y, aimX, aimY, fxLayer, this);
+        }
+
+        // 对法术范围内的敌人造成伤害
+        // - self 类型: 以玩家为中心
+        // - aoe/projectile/blink 类型: 以目标点为中心
+        var dmgCenterX = (spellType == "self") ? pos.x : aimX;
+        var dmgCenterY = (spellType == "self") ? pos.y : aimY;
+
         var spellDmg = getSpellBaseDamage(skillId);
         for (e in engine.entities) {
             if (!e.alive || e.isPlayer) continue;
             var ePos = e.get(PositionComp);
             var eCult = e.get(CultivationComp);
             if (ePos == null || eCult == null) continue;
-            var dx = ePos.x - mx;
-            var dy = ePos.y - my;
-            if (dx * dx + dy * dy < 100 * 100) {
+            var dx = ePos.x - dmgCenterX;
+            var dy = ePos.y - dmgCenterY;
+            if (dx * dx + dy * dy < spellRange * spellRange) {
                 var mult = cult.getSpellMultiplier(skillId);
                 var dmg = Math.round(spellDmg * mult);
                 eCult.hp -= dmg;
                 spawnDamageNumber(ePos.x, ePos.y - 20, dmg, 0xffdd44);
+
+                // 击退(从释放中心向外)
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 1) dist = 1;
+                var knockForce = 200;
+                ePos.vx += (dx / dist) * knockForce;
+                ePos.vy += (dy / dist) * knockForce;
 
                 if (eCult.hp <= 0) {
                     e.alive = false;
@@ -642,6 +789,38 @@ class GameScene extends Scene {
                 }
             }
         }
+
+        // 退出瞄准模式
+        cancelTargeting();
+    }
+
+    // 查找最近的敌人, 返回其位置
+    function findNearestEnemy():{x:Float, y:Float} {
+        var pos = playerEntity.get(PositionComp);
+        if (pos == null) return null;
+
+        var nearestDist = Math.POSITIVE_INFINITY;
+        var nearestX:Float = 0;
+        var nearestY:Float = 0;
+        var found = false;
+
+        for (e in engine.entities) {
+            if (!e.alive || e.isPlayer) continue;
+            var ePos = e.get(PositionComp);
+            if (ePos == null) continue;
+            var dx = ePos.x - pos.x;
+            var dy = ePos.y - pos.y;
+            var dist = dx * dx + dy * dy;
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestX = ePos.x;
+                nearestY = ePos.y;
+                found = true;
+            }
+        }
+
+        if (found) return {x: nearestX, y: nearestY};
+        return null;
     }
 
     // ============================================================
@@ -763,6 +942,40 @@ class GameScene extends Scene {
             case "clone": 60;
             case "voidshift": 70;
             default: 50;
+        };
+    }
+
+    // 法术伤害范围(半径, 像素) - 用于目标选择指示器和伤害判定
+    function getSpellRange(spellId:String):Float {
+        return switch (spellId) {
+            case "fireball": 80;     // 火球爆炸范围
+            case "thunder": 60;      // 雷击范围
+            case "ice": 70;          // 冰冻扩散范围
+            case "swordqi": 200;     // 剑气发射范围(以玩家为中心)
+            case "thunderstorm": 250;// 雷暴大范围
+            case "pocket": 150;      // 袖里乾坤吸入范围
+            case "lotus": 200;       // 莲花绽放范围
+            case "bigdipper": 200;   // 北斗坠落范围
+            case "clone": 100;       // 分影术范围
+            case "voidshift": 80;    // 瞬移落点范围
+            default: 100;
+        };
+    }
+
+    // 法术类型: "projectile"=投射物(需要目标位置), "aoe"=范围伤害(以鼠标为中心), "self"=以自身为中心
+    function getSpellType(spellId:String):String {
+        return switch (spellId) {
+            case "fireball": "projectile";  // 火球飞向目标点
+            case "thunder": "aoe";          // 雷直接在目标点降下
+            case "ice": "projectile";       // 冰晶飞向目标点
+            case "swordqi": "self";         // 以自身为中心放射
+            case "thunderstorm": "aoe";     // 以目标点为中心大范围雷暴
+            case "pocket": "self";          // 以自身为中心吸入
+            case "lotus": "self";           // 以自身为中心绽放
+            case "bigdipper": "aoe";        // 以目标点为中心北斗坠落
+            case "clone": "self";           // 以自身为中心分身
+            case "voidshift": "blink";      // 瞬移到目标点
+            default: "aoe";
         };
     }
 
@@ -958,6 +1171,17 @@ class GameScene extends Scene {
             }
         }
 
+        // 法术瞄准模式: 更新指示器和超时
+        if (pendingSpell != null) {
+            targetingTimer -= dt;
+            if (targetingTimer <= 0) {
+                cancelTargeting();
+                flashInfo("施法超时, 已取消");
+            } else {
+                updateTargetingIndicator();
+            }
+        }
+
         if (breakthroughFlash > 0) {
             breakthroughFlash -= dt * 2;
             if (breakthroughFlash < 0) breakthroughFlash = 0;
@@ -1065,7 +1289,31 @@ class GameScene extends Scene {
         if (Key.isPressed(Key.NUMPAD_5) || Key.isPressed(Key.NUMBER_5)) castFormation("jiugong");
 
         if (Key.isPressed(Key.SPACE)) normalAttack();
-        if (Key.isPressed(Key.MOUSE_LEFT)) castSpell("thunder", 50, 2.0);
+
+        // === 法术目标选择 ===
+        if (pendingSpell != null) {
+            // 瞄准模式: 左键确认释放
+            if (Key.isPressed(Key.MOUSE_LEFT)) {
+                executeSpellCast(camMouseX, camMouseY);
+            }
+            // Tab: 自动锁定最近敌人
+            if (Key.isPressed(Key.TAB)) {
+                var nearest = findNearestEnemy();
+                if (nearest != null) {
+                    executeSpellCast(nearest.x, nearest.y);
+                } else {
+                    flashInfo("附近无敌人, 使用鼠标选择位置");
+                }
+            }
+            // 右键/Esc: 取消
+            if (Key.isPressed(Key.MOUSE_RIGHT) || Key.isPressed(Key.ESCAPE)) {
+                cancelTargeting();
+                flashInfo("已取消施法");
+            }
+        } else {
+            // 非瞄准模式: 左键 = 普攻
+            if (Key.isPressed(Key.MOUSE_LEFT)) normalAttack();
+        }
     }
 
     function updateUI(dt:Float) {
