@@ -222,7 +222,7 @@ class SpellSystem {
             var dy = e.y - clampedY;
             var distSq = dx * dx + dy * dy;
             if (distSq < 100 * 100) {
-                scene.dealDamage(e, 70, dx * 3, dy * 3);
+                scene.dealSpellDamage(e, 70, "voidshift", dx * 3, dy * 3);
             }
         }
     }
@@ -304,7 +304,7 @@ class SpellSystem {
             var dx = e.x - x;
             var dy = e.y - y;
             if (dx * dx + dy * dy < 60 * 60) {
-                scene.dealDamage(e, 80, dx * 2, dy * 2);
+                scene.dealSpellDamage(e, 80, "thunder", dx * 2, dy * 2);
             }
         }
     }
@@ -455,7 +455,7 @@ class SpellSystem {
                         var dx = e.x - x;
                         var dy = e.y - y;
                         if (dx * dx + dy * dy < 70 * 70) {
-                            scene.dealDamage(e, 50, dx * 1.5, dy * 1.5);
+                            scene.dealSpellDamage(e, 50, "bigdipper", dx * 1.5, dy * 1.5);
                         }
                     }
 
@@ -597,7 +597,7 @@ class FireballProjectile extends Object {
             var dx = e.x - x;
             var dy = e.y - y;
             if (dx * dx + dy * dy < 80 * 80) {
-                scene.dealDamage(e, 60, dx * 1.5, dy * 1.5);
+                scene.dealSpellDamage(e, 60, "fireball", dx * 1.5, dy * 1.5);
             }
         }
 
@@ -742,7 +742,7 @@ class IceProjectile extends Object {
             var dx = e.x - x;
             var dy = e.y - y;
             if (dx * dx + dy * dy < 70 * 70) {
-                scene.dealDamage(e, 50, dx * 1.2, dy * 1.2);
+                scene.dealSpellDamage(e, 50, "swordqi", dx * 1.2, dy * 1.2);
                 e.vx *= 0.3;
                 e.vy *= 0.3;
             }
@@ -839,7 +839,7 @@ class SwordProjectile extends Object {
             var dx = e.x - x;
             var dy = e.y - y;
             if (dx * dx + dy * dy < 20 * 20) {
-                scene.dealDamage(e, 40, Math.cos(angle) * 100, Math.sin(angle) * 100);
+                scene.dealSpellDamage(e, 40, "pocket", Math.cos(angle) * 100, Math.sin(angle) * 100);
                 for (i in 0...5) {
                     var p = scene.getParticle();
                     var sa = Math.random(Math.PI * 2);
@@ -968,7 +968,7 @@ class SpaceVortex extends Object {
                 var dx = e.x - x;
                 var dy = e.y - y;
                 if (dx * dx + dy * dy < radius * radius) {
-                    scene.dealDamage(e, 15, 0, 0);
+                    scene.dealSpellDamage(e, 15, "pocket", 0, 0);
                 }
             }
         }
@@ -1026,7 +1026,7 @@ class SpaceVortex extends Object {
             var dx = e.x - x;
             var dy = e.y - y;
             if (dx * dx + dy * dy < 120 * 120) {
-                scene.dealDamage(e, 100, dx * 2, dy * 2);
+                scene.dealSpellDamage(e, 100, "pocket", dx * 2, dy * 2);
             }
         }
 
@@ -1136,7 +1136,7 @@ class LotusBloomEffect extends Object {
                 var dx = e.x - x;
                 var dy = e.y - y;
                 if (dx * dx + dy * dy < 100 * 100) {
-                    scene.dealDamage(e, 25, dx * 0.5, dy * 0.5);
+                    scene.dealSpellDamage(e, 25, "lotus", dx * 0.5, dy * 0.5);
                 }
             }
         }
