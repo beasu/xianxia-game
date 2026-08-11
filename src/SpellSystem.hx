@@ -4,6 +4,7 @@ import h2d.Tile;
 import h2d.Graphics;
 import h2d.filter.Glow;
 import hxd.Math;
+import ecs.Components.PositionComp;
 
 /**
     SpellSystem - 法术特效系统
@@ -204,11 +205,14 @@ class SpellSystem {
             p.drag = 0.92;
         }
 
-        // 瞬移
-        var clampedX = Math.clamp(toX, 20, scene.width - 20);
-        var clampedY = Math.clamp(toY, 40, scene.height - 60);
+        // 瞬移 (使用世界边界 clamp)
+        var clampedX = Math.clamp(toX, 20, GameScene.inst.engine.worldWidth - 20);
+        var clampedY = Math.clamp(toY, 40, GameScene.inst.engine.worldHeight - 20);
         player.x = clampedX;
         player.y = clampedY;
+        // 同步 PositionComp
+        var pPos = GameScene.inst.playerEntity.get(PositionComp);
+        if (pPos != null) { pPos.x = clampedX; pPos.y = clampedY; }
 
         // 终点冲击波
         spawnExplosion(clampedX, clampedY, 0xff44aa, 100, layer, scene);

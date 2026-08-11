@@ -790,11 +790,7 @@ class Cultivator extends Object {
         hpBarFill.scaleX = ratio * charScale;
         hpBarFill.x = -40;
 
-        if (isPlayer) {
-            var sc = GameScene.inst;
-            x = Math.clamp(x, 30, sc.width - 30);
-            y = Math.clamp(y, 60, sc.height - 80);
-        }
+        // 玩家位置由 PositionComp + handleInput 控制, 不在此处 clamp
 
         if (dead) {
             alpha -= dt * 2;

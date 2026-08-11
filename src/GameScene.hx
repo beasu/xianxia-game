@@ -37,11 +37,18 @@ class GameScene extends Scene {
     public static var inst2:WorldEngine;
 
     // --- 渲染层 ---
+    public var worldCamera:Object;      // 镜头容器: 所有世界元素挂在此节点下, 平移它实现镜头跟随
     public var fxLayer:Object;
     public var formationLayer:Object;
     public var bgLayer:Object;
     public var entityLayer:Object;
-    public var uiLayer:Object;
+    public var uiLayer:Object;          // UI 层不挂在 worldCamera 下, 始终固定在屏幕上
+
+    // --- 镜头 ---
+    public var camX:Float = 0;          // 镜头左上角在世界坐标中的 X
+    public var camY:Float = 0;          // 镜头左上角在世界坐标中的 Y
+    public var viewW:Float;             // 可视区域宽(屏幕宽)
+    public var viewH:Float;             // 可视区域高(屏幕高)
 
     // --- 阵法 ---
     public var activeFormation:Formation;
@@ -53,8 +60,8 @@ class GameScene extends Scene {
     // --- 实体渲染映射 (Entity.id -> Cultivator) ---
     public var renderMap:Map<Int, Cultivator> = [];
 
-    // --- 鼠标 ---
-    public var camMouseX:Float = 0;
+    // --- 鼠标(世界坐标) ---
+    public var camMouseX:Float = 0;  // 已转换为世界坐标
     public var camMouseY:Float = 0;
 
     // --- 时间 ---
@@ -121,17 +128,22 @@ class GameScene extends Scene {
         super();
         inst = this;
         initLayers();
-        initBackground();
         initWorldEngine();
+        initBackground();
         initHaxeUI();
         castFormation("bagua");
     }
 
     function initLayers() {
-        bgLayer = new Object(this);
-        formationLayer = new Object(this);
-        entityLayer = new Object(this);
-        fxLayer = new Object(this);
+        // worldCamera 是所有"世界元素"的父节点, 平移它实现镜头跟随
+        worldCamera = new Object(this);
+
+        bgLayer = new Object(worldCamera);
+        formationLayer = new Object(worldCamera);
+        entityLayer = new Object(worldCamera);
+        fxLayer = new Object(worldCamera);
+
+        // UI 层直接挂在 Scene 下, 不受镜头移动影响
         uiLayer = new Object(this);
     }
 
@@ -139,7 +151,12 @@ class GameScene extends Scene {
     //  世界引擎初始化
     // ============================================================
     function initWorldEngine() {
-        engine = new WorldEngine(width, height);
+        // 世界尺寸 = 屏幕的 3 倍, 玩家可以在广阔世界中探索
+        viewW = width;
+        viewH = height;
+        var worldW = width * 3;
+        var worldH = height * 3;
+        engine = new WorldEngine(worldW, worldH);
         inst2 = engine;
 
         // 注册系统
@@ -160,7 +177,7 @@ class GameScene extends Scene {
         playerEntity = new Entity("青云道长");
         playerEntity.isPlayer = true;
 
-        var pos = new PositionComp(width * 0.5, height * 0.7);
+        var pos = new PositionComp(engine.worldWidth * 0.5, engine.worldHeight * 0.5);
         var cult = new CultivationComp();
         cult.maxHp = 1000; cult.hp = 1000;
         cult.maxMp = 500; cult.mp = 500;
@@ -241,6 +258,8 @@ class GameScene extends Scene {
     //  背景渲染(保留之前的升级版)
     // ============================================================
     function initBackground() {
+        var ww = engine.worldWidth;
+        var wh = engine.worldHeight;
         for (i in 0...40) {
             var t = i / 40.0;
             var r = Std.int(0x08 + (0x18 - 0x08) * t);
@@ -249,22 +268,22 @@ class GameScene extends Scene {
             var color = (r << 16) | (g << 8) | b;
             var tile = Tile.fromColor(color, 1, 1);
             var bmp = new Bitmap(tile, bgLayer);
-            bmp.scaleX = width;
-            bmp.scaleY = height / 40 + 1;
-            bmp.y = i * (height / 40);
+            bmp.scaleX = ww;
+            bmp.scaleY = wh / 40 + 1;
+            bmp.y = i * (wh / 40);
         }
 
-        for (i in 0...60) {
+        for (i in 0...120) {
             var starSize = Math.random(2) + 1;
             var star = new Bitmap(Tile.fromColor(0xffffff, Std.int(starSize), Std.int(starSize)), bgLayer);
-            star.x = Math.random(width);
-            star.y = Math.random(height * 0.6);
+            star.x = Math.random(ww);
+            star.y = Math.random(wh * 0.6);
             star.alpha = randRange(0.2, 0.8);
         }
 
         var moonG = new h2d.Graphics(bgLayer);
-        var moonX = width * 0.82;
-        var moonY = height * 0.15;
+        var moonX = ww * 0.82;
+        var moonY = wh * 0.15;
         for (i in 0...5) {
             var t = i / 5.0;
             moonG.beginFill(0xfff8e0, (1.0 - t) * 0.06);
@@ -280,54 +299,56 @@ class GameScene extends Scene {
         moonG.drawCircle(moonX - 2, moonY + 6, 2);
         moonG.endFill();
 
-        drawMountainLayer(height * 0.5, 0x1a1a3a, 0.15, 0.7);
-        drawMountainLayer(height * 0.65, 0x2a2a4a, 0.25, 0.5);
-        drawMountainLayer(height * 0.8, 0x1a1a3a, 0.4, 0.3);
+        drawMountainLayer(wh * 0.5, 0x1a1a3a, 0.15, 0.7);
+        drawMountainLayer(wh * 0.65, 0x2a2a4a, 0.25, 0.5);
+        drawMountainLayer(wh * 0.8, 0x1a1a3a, 0.4, 0.3);
 
-        for (i in 0...6) {
+        for (i in 0...18) {
             var cloud = new h2d.Graphics(bgLayer);
-            var cy = randRange(height * 0.3, height * 0.7);
-            var cx = Math.random(width);
+            var cy = randRange(wh * 0.3, wh * 0.7);
+            var cx = Math.random(ww);
             cloud.alpha = randRange(0.04, 0.1);
             bgClouds.push({g: cloud, x: cx, y: cy, vx: randRange(3, 8), alpha: cloud.alpha});
             drawCloud(cloud, 0, 0, randRange(60, 120));
         }
 
-        for (i in 0...25) {
+        for (i in 0...75) {
             var size = Math.random(3) + 2;
             var colors = [0x66aaff, 0x88ffaa, 0xffaa66, 0xaaff88];
             var c = colors[Std.int(Math.random(colors.length))];
             var p = new Bitmap(Tile.fromColor(c, Std.int(size), Std.int(size)), bgLayer);
-            p.x = Math.random(width);
-            p.y = Math.random(height);
+            p.x = Math.random(ww);
+            p.y = Math.random(wh);
             p.alpha = randRange(0.2, 0.5);
             bgSpiritParticles.push({bmp: p, x: p.x, y: p.y, vy: randRange(-15, -5), alpha: p.alpha, phase: Math.random(Math.PI * 2)});
         }
     }
 
     function drawMountainLayer(baseY:Float, color:Int, alpha:Float, variation:Float) {
+        var ww = engine.worldWidth;
+        var wh = engine.worldHeight;
         var g = new h2d.Graphics(bgLayer);
         g.alpha = alpha;
         g.beginFill(color);
-        g.moveTo(0, height);
+        g.moveTo(0, wh);
         g.lineTo(0, baseY);
-        var peaks = 8;
+        var peaks = 24;
         for (i in 0...peaks) {
             var t = i / peaks;
-            var x = width * t;
+            var x = ww * t;
             var peakHeight = randRange(30, 80) * variation;
             g.lineTo(x, baseY - peakHeight);
             var nextT = (i + 1) / peaks;
             var valleyY = baseY + randRange(10, 30);
-            g.lineTo(width * (t + nextT) * 0.5, valleyY);
+            g.lineTo(ww * (t + nextT) * 0.5, valleyY);
         }
-        g.lineTo(width, baseY);
-        g.lineTo(width, height);
-        g.lineTo(0, height);
+        g.lineTo(ww, baseY);
+        g.lineTo(ww, wh);
+        g.lineTo(0, wh);
         g.endFill();
         g.beginFill(0xffffff, 0.03);
-        for (i in 0...4) {
-            g.drawCircle(randRange(0, width), baseY - randRange(20, 60), randRange(40, 80));
+        for (i in 0...8) {
+            g.drawCircle(randRange(0, ww), baseY - randRange(20, 60), randRange(40, 80));
         }
         g.endFill();
     }
@@ -346,9 +367,11 @@ class GameScene extends Scene {
     }
 
     function updateBackground(dt:Float) {
+        var ww = engine.worldWidth;
+        var wh = engine.worldHeight;
         for (c in bgClouds) {
             c.x += c.vx * dt;
-            if (c.x > width + 150) c.x = -150;
+            if (c.x > ww + 150) c.x = -150;
             c.g.x = c.x;
             c.g.y = c.y + Math.sin(bgTime * 0.5 + c.x * 0.01) * 5;
             c.g.alpha = c.alpha * (0.7 + Math.sin(bgTime * 0.8 + c.x * 0.02) * 0.3);
@@ -359,7 +382,7 @@ class GameScene extends Scene {
             p.bmp.x = p.x + Math.sin(p.phase) * 10;
             p.bmp.y = p.y;
             p.bmp.alpha = p.alpha * (0.5 + Math.sin(p.phase * 0.7) * 0.5);
-            if (p.y < -10) { p.y = height + 10; p.x = Math.random(width); }
+            if (p.y < -10) { p.y = wh + 10; p.x = Math.random(ww); }
         }
     }
 
@@ -741,15 +764,37 @@ class GameScene extends Scene {
         var dt = ctx.elapsedTime;
 
         var win = Window.getInstance();
-        camMouseX = win.mouseX;
-        camMouseY = win.mouseY;
+
+        // 玩家移动输入 -> 直接更新 PositionComp
+        handleInput(dt);
+
+        // === 镜头跟随玩家 ===
+        var pos = playerEntity.get(PositionComp);
+        if (pos != null) {
+            // 镜头目标: 玩家居中
+            var targetCamX = pos.x - viewW * 0.5;
+            var targetCamY = pos.y - viewH * 0.5;
+
+            // 镜头不超出世界边界
+            targetCamX = Math.clamp(targetCamX, 0, engine.worldWidth - viewW);
+            targetCamY = Math.clamp(targetCamY, 0, engine.worldHeight - viewH);
+
+            // 平滑插值 (lerp factor 0.12)
+            camX += (targetCamX - camX) * 0.12;
+            camY += (targetCamY - camY) * 0.12;
+
+            // 应用到 worldCamera
+            worldCamera.x = -camX;
+            worldCamera.y = -camY;
+        }
+
+        // 鼠标坐标转换为世界坐标
+        camMouseX = win.mouseX + camX;
+        camMouseY = win.mouseY + camY;
 
         // 背景动画
         bgTime += dt;
         updateBackground(dt);
-
-        // 玩家移动输入 -> 提交为 PositionComp 速度
-        handleInput(dt);
 
         // === 驱动世界引擎 ===
         engine.update(dt);
@@ -884,8 +929,9 @@ class GameScene extends Scene {
         if (Key.isDown(Key.D) || Key.isDown(Key.RIGHT)) pos.vx += speed;
         pos.x += pos.vx * dt;
         pos.y += pos.vy * dt;
-        pos.x = hxd.Math.clamp(pos.x, 0, engine.worldWidth);
-        pos.y = hxd.Math.clamp(pos.y, 0, engine.worldHeight);
+        // 玩家限制在世界边界内
+        pos.x = Math.clamp(pos.x, 30, engine.worldWidth - 30);
+        pos.y = Math.clamp(pos.y, 30, engine.worldHeight - 30);
 
         if (Key.isPressed(Key.Q)) castSpell("fireball", 30, 1.5);
         if (Key.isPressed(Key.E)) castSpell("ice", 35, 1.8);
