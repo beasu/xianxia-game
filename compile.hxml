@@ -1,0 +1,9 @@
+-cp src
+-lib heaps
+-lib haxeui-heaps
+-D resourcesPath=res
+
+# --- JS target (primary, runs in browser via WebGL) ---
+-main Main
+-js bin/xianxia.js
+-D js-es=6

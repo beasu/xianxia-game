@@ -1,0 +1,17 @@
+# Build output
+bin/
+*.js
+!index.html
+
+# Haxe build cache
+.haxe/
+dump/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp

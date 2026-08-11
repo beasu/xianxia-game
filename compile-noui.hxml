@@ -1,0 +1,6 @@
+-cp src
+-lib heaps
+-D resourcesPath=res
+-D heaps=nekoui
+-main Main
+-neko bin/xianxia.n

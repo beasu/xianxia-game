@@ -1,0 +1,8 @@
+-cp src
+-lib heaps
+-lib haxeui-heaps
+-D resourcesPath=res
+-D heaps=nekoui
+-main Main
+-js bin/xianxia.js
+-D js-es=6
