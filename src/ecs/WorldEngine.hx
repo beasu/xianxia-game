@@ -387,7 +387,22 @@ class WorldEngine {
             fac.factionRank = Std.int(Math.random(2));
         }
 
-        e.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npcState);
+        // 社交组件
+        var social = new SocialComp();
+        social.ambition = randRange(0.2, 0.9);
+        social.loyalty = randRange(0.3, 0.9);
+        social.charm = randRange(0.3, 0.9);
+        // 根据NPC类型分配社交角色
+        if (npcState.npcType == "mojiang" || npcState.npcType == "xiexian") {
+            social.socialRole = "schemer"; // 阴谋家
+            social.ambition = randRange(0.6, 0.95);
+        } else if (npcState.npcType == "cultivator") {
+            social.socialRole = Math.random() < 0.3 ? "leader" : "diplomat";
+        } else {
+            social.socialRole = "loner";
+        }
+
+        e.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npcState).add(social);
 
         addEntity(e);
 

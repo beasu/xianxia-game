@@ -361,6 +361,15 @@ class IntentResolutionSystem implements ISystem {
             case PlayerCommand:
                 // 玩家指令已在 processPlayerCommands 中处理
 
+            case Socialize:
+                // 社交行为由 NPCSocialSystem 处理, 这里不重复
+
+            case Betray:
+                // 背叛由 NPCSocialSystem 处理
+
+            case Assassinate:
+                // 暗杀由 NPCSocialSystem 处理
+
             case Dead:
                 // do nothing
         }

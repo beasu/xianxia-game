@@ -23,6 +23,9 @@ import ecs.Entity.ISystem;
 import ecs.Components;
 import ecs.WorldEngine;
 import ecs.Systems;
+import ecs.WorldEcologySystem;
+import ecs.KarmaAndTribulationSystem;
+import ecs.NPCSocialSystem;
 
 /**
     GameScene - 修仙世界观察者
@@ -161,7 +164,10 @@ class GameScene extends Scene {
 
         // 注册系统
         engine.addSystem(new IntentResolutionSystem());
+        engine.addSystem(new NPCSocialSystem());
+        engine.addSystem(new WorldEcologySystem());
         engine.addSystem(new EcologySystem());
+        engine.addSystem(new KarmaAndTribulationSystem());
         engine.addSystem(new HistorySystem());
 
         // 初始化灵脉
@@ -212,8 +218,10 @@ class GameScene extends Scene {
         inv.spiritStones = 100;
         var fac = new FactionComp();
         var npc = new NPCStateComp();
+        var social = new SocialComp(); // 玩家也参与社交系统
+        social.charm = 0.8; // 玩家魅力较高
 
-        playerEntity.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npc);
+        playerEntity.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npc).add(social);
         engine.addEntity(playerEntity);
 
         // 创建玩家渲染对象
