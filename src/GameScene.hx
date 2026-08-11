@@ -101,7 +101,7 @@ class GameScene extends Scene {
 
     static var skillDefs = [
         {key: "Q", name: "Q\n三昧真火", skill: "fireball", cd: 1.5, mpCost: 30},
-        {key: "W", name: "W\n九天玄雷", skill: "thunder", cd: 2.0, mpCost: 50},
+        {key: "F", name: "F\n九天玄雷", skill: "thunder", cd: 2.0, mpCost: 50},
         {key: "E", name: "E\n玄冰诀", skill: "ice", cd: 1.8, mpCost: 35},
         {key: "R", name: "R\n万剑归宗", skill: "swordqi", cd: 3.0, mpCost: 60},
         {key: "T", name: "T\n天雷破", skill: "thunderstorm", cd: 5.0, mpCost: 100},
@@ -934,6 +934,7 @@ class GameScene extends Scene {
         pos.y = Math.clamp(pos.y, 30, engine.worldHeight - 30);
 
         if (Key.isPressed(Key.Q)) castSpell("fireball", 30, 1.5);
+        if (Key.isPressed(Key.F)) castSpell("thunder", 50, 2.0);
         if (Key.isPressed(Key.E)) castSpell("ice", 35, 1.8);
         if (Key.isPressed(Key.R)) castSpell("swordqi", 60, 3.0);
         if (Key.isPressed(Key.T)) castSpell("thunderstorm", 100, 5.0);
