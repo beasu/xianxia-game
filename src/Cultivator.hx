@@ -158,8 +158,8 @@ class Cultivator extends Object {
     var animTime:Float = 0;
     var facingRight:Bool = true;
 
-    // 整体缩放 - 让角色更大更有质感
-    var charScale:Float = 2.0;
+    // 整体缩放 - 让角色大小适中
+    var charScale:Float = 1.2;
 
     // 境界列表
     public static var realmList = [
