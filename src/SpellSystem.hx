@@ -371,8 +371,8 @@ class SpellSystem {
 
     public static function spawnScreenFlash(color:Int, intensity:Float, duration:Float, layer:Object, scene:GameScene) {
         var flash = new Bitmap(Tile.fromColor(color, 1, 1), layer);
-        flash.scaleX = scene.width;
-        flash.scaleY = scene.height;
+        flash.scaleX = GameScene.inst.engine.worldWidth;
+        flash.scaleY = GameScene.inst.engine.worldHeight;
         flash.alpha = intensity;
 
         haxe.Timer.delay(function() {
@@ -564,7 +564,7 @@ class FireballProjectile extends Object {
             }
         }
 
-        if (x < -50 || x > scene.width + 50 || y < -50 || y > scene.height + 50) {
+        if (x < -50 || x > GameScene.inst.engine.worldWidth + 50 || y < -50 || y > GameScene.inst.engine.worldHeight + 50) {
             alive = false;
             remove();
         }
@@ -710,7 +710,7 @@ class IceProjectile extends Object {
             }
         }
 
-        if (x < -50 || x > scene.width + 50 || y < -50 || y > scene.height + 50) {
+        if (x < -50 || x > GameScene.inst.engine.worldWidth + 50 || y < -50 || y > GameScene.inst.engine.worldHeight + 50) {
             alive = false;
             remove();
         }
@@ -863,7 +863,7 @@ class SwordProjectile extends Object {
             }
         }
 
-        if (x < -50 || x > scene.width + 50 || y < -50 || y > scene.height + 50) {
+        if (x < -50 || x > GameScene.inst.engine.worldWidth + 50 || y < -50 || y > GameScene.inst.engine.worldHeight + 50) {
             alive = false;
             remove();
         }

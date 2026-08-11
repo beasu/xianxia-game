@@ -636,6 +636,112 @@ class GameScene extends Scene {
         }
     }
 
+    // ============================================================
+    //  普攻: 空格键触发, 无灵力消耗, 短冷却
+    //  朝面向方向发出一道剑气斩击, 对近距离敌人造成伤害
+    // ============================================================
+    public function normalAttack() {
+        var cdKey = "normal";
+        if (cooldowns.exists(cdKey) && cooldowns[cdKey] > 0) return;
+        cooldowns[cdKey] = 0.4; // 0.4 秒冷却
+
+        var pos = playerEntity.get(PositionComp);
+        var cult = playerEntity.get(CultivationComp);
+        if (pos == null || cult == null) return;
+
+        // 朝鼠标方向攻击
+        var dx = camMouseX - pos.x;
+        var dy = camMouseY - pos.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 1) dist = 1;
+        var dirX = dx / dist;
+        var dirY = dy / dist;
+
+        // 普攻特效: 短剑气斩
+        var slashRange = 120;
+        var slashX = pos.x + dirX * slashRange * 0.5;
+        var slashY = pos.y + dirY * slashRange * 0.5;
+        var slashAngle = Math.atan2(dirY, dirX);
+
+        // 绘制剑气弧线
+        var slash = new h2d.Graphics(fxLayer);
+        slash.x = slashX;
+        slash.y = slashY;
+        slash.rotation = slashAngle;
+        slash.alpha = 0.8;
+        slash.lineStyle(3, 0xffffff, 0.9);
+        slash.moveTo(-40, -15);
+        slash.lineTo(40, 0);
+        slash.lineTo(-40, 15);
+        slash.lineTo(-30, 0);
+        slash.endFill();
+        slash.lineStyle(6, 0xaaddff, 0.3);
+        slash.moveTo(-40, -15);
+        slash.lineTo(40, 0);
+        slash.lineTo(-40, 15);
+        slash.endFill();
+
+        haxe.Timer.delay(function() {
+            if (slash.parent != null) slash.remove();
+        }, 150);
+
+        // 少量粒子
+        for (i in 0...8) {
+            var p = getParticle();
+            p.x = slashX + randRange(-20, 20);
+            p.y = slashY + randRange(-20, 20);
+            p.vx = dirX * randRange(80, 200) + randRange(-40, 40);
+            p.vy = dirY * randRange(80, 200) + randRange(-40, 40);
+            p.life = randRange(0.15, 0.3);
+            p.maxLife = p.life;
+            p.size = randRange(2, 5);
+            p.color = 0xffffff;
+            p.type = Spark;
+            p.glow = true;
+            p.fade = true;
+            p.drag = 0.9;
+        }
+
+        // 对前方扇形范围内的敌人造成伤害
+        var baseDmg = Std.int(cult.attackPower * 0.8);
+        var hitRange = slashRange;
+        for (e in engine.entities) {
+            if (!e.alive || e.isPlayer) continue;
+            var ePos = e.get(PositionComp);
+            var eCult = e.get(CultivationComp);
+            if (ePos == null || eCult == null) continue;
+
+            var ex = ePos.x - pos.x;
+            var ey = ePos.y - pos.y;
+            var eDist = Math.sqrt(ex * ex + ey * ey);
+            if (eDist > hitRange) continue;
+
+            // 检查角度: 前方 ±60 度
+            var dot = (ex * dirX + ey * dirY) / (eDist + 0.01);
+            if (dot < 0.5) continue; // cos(60°) ≈ 0.5
+
+            var mult = cult.getSpellMultiplier("normal");
+            var dmg = Math.round(baseDmg * mult);
+            eCult.hp -= dmg;
+
+            // 击退
+            ePos.vx += dirX * 150;
+            ePos.vy += dirY * 150;
+
+            spawnDamageNumber(ePos.x, ePos.y - 20, dmg, 0xffffff);
+
+            if (eCult.hp <= 0) {
+                e.alive = false;
+                killCount++;
+                spawnDeathEffect(ePos.x, ePos.y);
+                cult.exp += 10 + eCult.realmIndex * 8;
+                if (cult.exp >= cult.expToNext) {
+                    doPlayerBreakthrough();
+                }
+            }
+        }
+    }
+
     function getSpellBaseDamage(spellId:String):Int {
         return switch (spellId) {
             case "fireball": 60;
@@ -950,6 +1056,7 @@ class GameScene extends Scene {
         if (Key.isPressed(Key.NUMPAD_4) || Key.isPressed(Key.NUMBER_4)) castFormation("beidou");
         if (Key.isPressed(Key.NUMPAD_5) || Key.isPressed(Key.NUMBER_5)) castFormation("jiugong");
 
+        if (Key.isPressed(Key.SPACE)) normalAttack();
         if (Key.isPressed(Key.MOUSE_LEFT)) castSpell("thunder", 50, 2.0);
     }
 
