@@ -7,6 +7,10 @@ import hxd.Key;
 import hxd.Math;
 import hxd.Window;
 
+#if js
+import js.Browser;
+#end
+
 import haxe.ui.core.Screen;
 import haxe.ui.core.Component;
 import haxe.ui.components.Button;
@@ -17,6 +21,7 @@ import haxe.ui.containers.HBox;
 import haxe.ui.containers.VBox;
 import haxe.ui.containers.ScrollView;
 import haxe.ui.Toolkit;
+import haxe.ui.events.MouseEvent;
 
 import ecs.Entity.Entity;
 import ecs.Entity.ISystem;
@@ -26,6 +31,9 @@ import ecs.Systems;
 import ecs.WorldEcologySystem;
 import ecs.KarmaAndTribulationSystem;
 import ecs.NPCSocialSystem;
+import ecs.LifecycleAndHeritageSystem;
+import ecs.CraftingEconomySystem;
+import ecs.WorldCataclysmSystem;
 
 /**
     GameScene - 修仙世界观察者
@@ -92,8 +100,62 @@ class GameScene extends Scene {
     var uiRootDetail:Label;
     var uiSkillButtons:Array<Button> = [];
     var uiFormationButtons:Array<Button> = [];
-    var uiWorldInfo:Label;           // 世界信息
-    var uiEventLog:Label;            // 事件日志
+    var uiSpeedButtons:Array<Button> = []; // 时间速度按钮
+    var uiActiveEvent:Label;         // 当前进行中的世界事件
+
+    // --- Tab 按钮的 Heaps 原生 Interactive (绕过 HaxeUI 事件系统) ---
+    var tabInteractives:Array<h2d.Interactive> = [];
+
+    // --- 时间控制 ---
+    public var timeScale:Float = 1.0; // 0=暂停, 1=正常, 2/4=加速
+    public var paused:Bool = false;
+
+    // --- 世界元素渲染对象 ---
+    var herbNodeGraphics:Array<h2d.Graphics> = [];
+    var secretRealmGraphics:Array<h2d.Graphics> = [];
+
+    // --- NPC 详情浮窗 ---
+    var npcDetailPanel:VBox;
+    var npcDetailLabel:Label;
+    var npcDetailCloseBtn:Button;
+    var selectedNpcEntity:Entity;
+
+    // --- 右侧 Tab 容器(合并天道/宗门/编年史) ---
+    var rightTabBar:HBox;
+    var tabWorldBtn:Button;
+    var tabFactionBtn:Button;
+    var tabChronicleBtn:Button;
+    var currentRightTab:String = "world"; // world / faction / chronicle
+    // 单 Label 方案: 避免组件增删导致 HaxeUI validateData 崩溃
+    var uiTabContent:Label;
+    var worldTabText:String = "";
+    var factionTabText:String = "";
+    var chronicleTabText:String = "";
+
+    // --- 小地图 ---
+    var minimapGraphics:h2d.Graphics;
+    var minimapBorder:h2d.Graphics;
+
+    // --- 鼠标右键自动移动 ---
+    var moveTargetX:Float = 0;
+    var moveTargetY:Float = 0;
+    var isAutoMoving:Bool = false;
+
+    // === 仙侠水墨风样式常量 ===
+    // 配色: 墨黑底 + 金棕卷轴边 + 金红标题 + 米黄正文
+    static var SX_PANEL = "background-color:#0a0a14dd;border:2px solid #8b6914;border-radius:4px;padding:6px;";
+    static var SX_TITLE = "font-size:16px;color:#d4a04c;font-weight:bold;";
+    static var SX_SUBTITLE = "font-size:14px;color:#c8442a;font-weight:bold;";
+    static var SX_TEXT = "font-size:13px;color:#e8d8a8;";
+    static var SX_TEXT_DIM = "font-size:13px;color:#8a7a5c;";
+    static var SX_TEXT_HOT = "font-size:13px;color:#e8a04c;";
+    static var SX_BTN = "font-size:13px;background-color:#1a1410;border:1px solid #8b6914;color:#e8d8a8;border-radius:3px;";
+    static var SX_BTN_HOT = "font-size:13px;background-color:#4a3a1a;border:1px solid #d4a04c;color:#ffe8a8;border-radius:3px;font-weight:bold;";
+    static var SX_BTN_DANGER = "font-size:13px;background-color:#2a1410;border:1px solid #c8442a;color:#ff8866;border-radius:3px;";
+    static var SX_BAR_HP = "background-color:#2a0a08;border:1px solid #8b2418;";
+    static var SX_BAR_MP = "background-color:#081a2a;border:1px solid #2a5a8b;";
+    static var SX_BAR_EXP = "background-color:#0a1a0a;border:1px solid #4a7a3a;";
+    static var SX_SCROLL_BORDER = "border:2px solid #8b6914;border-radius:4px;background-color:#0a0a14ee;";
 
     // --- 技能冷却 ---
     public var cooldowns:Map<String, Float> = [];
@@ -178,9 +240,12 @@ class GameScene extends Scene {
         // 注册系统
         engine.addSystem(new IntentResolutionSystem());
         engine.addSystem(new NPCSocialSystem());
+        engine.addSystem(new LifecycleAndHeritageSystem());
         engine.addSystem(new WorldEcologySystem());
         engine.addSystem(new EcologySystem());
+        engine.addSystem(new CraftingEconomySystem());
         engine.addSystem(new KarmaAndTribulationSystem());
+        engine.addSystem(new WorldCataclysmSystem());
         engine.addSystem(new HistorySystem());
 
         // 初始化灵脉
@@ -188,6 +253,9 @@ class GameScene extends Scene {
 
         // 初始化势力
         engine.initFactions();
+
+        // 初始化灵草资源点
+        engine.initSpiritHerbNodes();
 
         // 订阅世界事件(用于 UI 显示)
         engine.subscribeToEvents(onWorldEvent);
@@ -234,7 +302,16 @@ class GameScene extends Scene {
         var social = new SocialComp(); // 玩家也参与社交系统
         social.charm = 0.8; // 玩家魅力较高
 
-        playerEntity.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npc).add(social);
+        // 玩家血脉与炼制能力(玩家作为天命之子, 出生即仙骨血脉)
+        var heritage = new HeritageComp();
+        heritage.bloodline = "仙骨";
+        heritage.generation = 1;
+        heritage.birthDay = 1;
+        var crafting = new CraftingComp();
+        crafting.alchemySkill = 30; // 玩家初始有一定炼丹基础
+        crafting.smithingSkill = 20;
+
+        playerEntity.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npc).add(social).add(heritage).add(crafting);
         engine.addEntity(playerEntity);
 
         // 创建玩家渲染对象
@@ -415,7 +492,7 @@ class GameScene extends Scene {
 
         // === 顶部状态栏 ===
         var topBar = new VBox();
-        topBar.width = width;
+        topBar.width = width - 290; // 缩短, 给右侧 Tab 按钮留空间
         topBar.paddingTop = 8;
         topBar.paddingLeft = 12;
         topBar.verticalSpacing = 3;
@@ -425,19 +502,19 @@ class GameScene extends Scene {
         uiRealmLabel = new Label();
         var cult = playerEntity.get(CultivationComp);
         uiRealmLabel.text = playerEntity.name + "  [" + cult.realmName + "]";
-        uiRealmLabel.styleString = "font-size:18px;color:#FFD700;font-weight:bold;";
+        uiRealmLabel.styleString = SX_TITLE;
         uiRealmLabel.width = 200;
         nameRow.addComponent(uiRealmLabel);
 
         uiRootLabel = new Label();
         uiRootLabel.text = cult.spiritRootName + "·" + cult.spiritRootQualityName;
-        uiRootLabel.styleString = "font-size:15px;color:#" + StringTools.hex(cult.getRootColor() & 0xffffff, 6) + ";font-weight:bold;";
+        uiRootLabel.styleString = "font-size:16px;color:#" + StringTools.hex(cult.getRootColor() & 0xffffff, 6) + ";font-weight:bold;";
         uiRootLabel.width = 130;
         nameRow.addComponent(uiRootLabel);
 
         uiKillLabel = new Label();
         uiKillLabel.text = "击杀: 0";
-        uiKillLabel.styleString = "font-size:14px;color:#aaaaff;";
+        uiKillLabel.styleString = SX_TEXT_HOT;
         uiKillLabel.width = 100;
         nameRow.addComponent(uiKillLabel);
         topBar.addComponent(nameRow);
@@ -447,7 +524,7 @@ class GameScene extends Scene {
         rootDescRow.horizontalSpacing = 6;
         uiRootDetail = new Label();
         uiRootDetail.text = "天赋:" + cult.talent + "  气运:" + cult.luck;
-        uiRootDetail.styleString = "font-size:12px;color:#aaaaff;";
+        uiRootDetail.styleString = SX_TEXT;
         uiRootDetail.width = 400;
         rootDescRow.addComponent(uiRootDetail);
         topBar.addComponent(rootDescRow);
@@ -455,71 +532,114 @@ class GameScene extends Scene {
         // HP/MP/EXP bars
         var hpRow = new HBox();
         hpRow.horizontalSpacing = 6;
-        var hpText = new Label(); hpText.text = "气血"; hpText.styleString = "font-size:13px;color:#ff6666;width:35px;";
+        var hpText = new Label(); hpText.text = "气血"; hpText.styleString = "font-size:14px;color:#c8442a;width:35px;font-weight:bold;";
         hpRow.addComponent(hpText);
         uiHpBar = new HorizontalProgress(); uiHpBar.width = 220; uiHpBar.height = 16; uiHpBar.min = 0; uiHpBar.max = cult.maxHp; uiHpBar.pos = cult.hp;
-        uiHpBar.styleString = "background-color:#330000;border-color:#660000;";
+        uiHpBar.styleString = SX_BAR_HP;
         hpRow.addComponent(uiHpBar);
-        uiHpNum = new Label(); uiHpNum.text = Std.string(cult.hp) + "/" + Std.string(cult.maxHp); uiHpNum.styleString = "font-size:12px;color:#ffaaaa;"; uiHpNum.width = 100;
+        uiHpNum = new Label(); uiHpNum.text = Std.string(cult.hp) + "/" + Std.string(cult.maxHp); uiHpNum.styleString = "font-size:13px;color:#e8a08c;"; uiHpNum.width = 100;
         hpRow.addComponent(uiHpNum);
         topBar.addComponent(hpRow);
 
         var mpRow = new HBox();
         mpRow.horizontalSpacing = 6;
-        var mpText = new Label(); mpText.text = "灵力"; mpText.styleString = "font-size:13px;color:#66aaff;width:35px;";
+        var mpText = new Label(); mpText.text = "灵力"; mpText.styleString = "font-size:14px;color:#4a9ec8;width:35px;font-weight:bold;";
         mpRow.addComponent(mpText);
         uiMpBar = new HorizontalProgress(); uiMpBar.width = 220; uiMpBar.height = 16; uiMpBar.min = 0; uiMpBar.max = cult.maxMp; uiMpBar.pos = cult.mp;
-        uiMpBar.styleString = "background-color:#000033;border-color:#000066;";
+        uiMpBar.styleString = SX_BAR_MP;
         mpRow.addComponent(uiMpBar);
-        uiMpNum = new Label(); uiMpNum.text = Std.string(cult.mp) + "/" + Std.string(cult.maxMp); uiMpNum.styleString = "font-size:12px;color:#aaccff;"; uiMpNum.width = 100;
+        uiMpNum = new Label(); uiMpNum.text = Std.string(cult.mp) + "/" + Std.string(cult.maxMp); uiMpNum.styleString = "font-size:13px;color:#8acce8;"; uiMpNum.width = 100;
         mpRow.addComponent(uiMpNum);
         topBar.addComponent(mpRow);
 
         var expRow = new HBox();
         expRow.horizontalSpacing = 6;
-        var expText = new Label(); expText.text = "修为"; expText.styleString = "font-size:13px;color:#88ff88;width:35px;";
+        var expText = new Label(); expText.text = "修为"; expText.styleString = "font-size:14px;color:#7ab85a;width:35px;font-weight:bold;";
         expRow.addComponent(expText);
         uiExpBar = new HorizontalProgress(); uiExpBar.width = 220; uiExpBar.height = 12; uiExpBar.min = 0; uiExpBar.max = cult.expToNext; uiExpBar.pos = cult.exp;
-        uiExpBar.styleString = "background-color:#003300;border-color:#006600;";
+        uiExpBar.styleString = SX_BAR_EXP;
         expRow.addComponent(uiExpBar);
-        uiExpLabel = new Label(); uiExpLabel.text = "0/100"; uiExpLabel.styleString = "font-size:12px;color:#88ff88;"; uiExpLabel.width = 100;
+        uiExpLabel = new Label(); uiExpLabel.text = "0/100"; uiExpLabel.styleString = "font-size:13px;color:#8acc6a;"; uiExpLabel.width = 100;
         expRow.addComponent(uiExpLabel);
         topBar.addComponent(expRow);
 
         Screen.instance.addComponent(topBar);
 
-        // === 世界信息面板(右上) ===
-        var worldPanel = new VBox();
-        worldPanel.verticalSpacing = 2;
-        worldPanel.paddingRight = 8;
-        worldPanel.paddingTop = 8;
-        worldPanel.left = width - 280;
-        worldPanel.top = 0;
-        worldPanel.width = 270;
+        // === 右侧 Tab: 按钮栏和内容分开为独立 Screen 组件 ===
+        // 先添加内容 Label(底层), 再添加按钮栏(顶层), 确保按钮可点击
+        uiTabContent = new Label();
+        uiTabContent.text = "第1年 第1日\n灵气浓度: 1.0\n修仙者: 6\n宗门: 8";
+        uiTabContent.styleString = SX_TEXT;
+        uiTabContent.width = 260;
+        uiTabContent.height = 400;
+        uiTabContent.left = width - 270;
+        uiTabContent.top = 34;
+        Screen.instance.addComponent(uiTabContent);
 
-        var worldTitle = new Label();
-        worldTitle.text = "--- 天道纪元 ---";
-        worldTitle.styleString = "font-size:14px;color:#ffaa00;font-weight:bold;";
-        worldPanel.addComponent(worldTitle);
+        // 按钮栏 — 后添加, 在 z-order 顶层, 确保点击不被遮挡
+        rightTabBar = new HBox();
+        rightTabBar.horizontalSpacing = 2;
+        rightTabBar.left = width - 270;
+        rightTabBar.top = 4;
+        rightTabBar.width = 260;
+        tabWorldBtn = new Button();
+        tabWorldBtn.text = "天道";
+        tabWorldBtn.width = 80; tabWorldBtn.height = 26;
+        tabWorldBtn.styleString = SX_BTN;
+        tabWorldBtn.onClick = function(_) {
+            #if js Browser.console.log("[TAB] 天道 onClick fired"); #end
+            switchRightTab("world");
+        };
+        #if js tabWorldBtn.registerEvent(MouseEvent.MOUSE_OVER, function(_) { Browser.console.log("[TAB] 天道 mouseover"); }); #end
+        #if js tabWorldBtn.registerEvent(MouseEvent.MOUSE_DOWN, function(_) { Browser.console.log("[TAB] 天道 mousedown"); }); #end
+        rightTabBar.addComponent(tabWorldBtn);
+        tabFactionBtn = new Button();
+        tabFactionBtn.text = "宗门";
+        tabFactionBtn.width = 80; tabFactionBtn.height = 26;
+        tabFactionBtn.styleString = SX_BTN;
+        tabFactionBtn.onClick = function(_) {
+            #if js Browser.console.log("[TAB] 宗门 onClick fired"); #end
+            switchRightTab("faction");
+        };
+        rightTabBar.addComponent(tabFactionBtn);
+        tabChronicleBtn = new Button();
+        tabChronicleBtn.text = "编年";
+        tabChronicleBtn.width = 80; tabChronicleBtn.height = 26;
+        tabChronicleBtn.styleString = SX_BTN;
+        tabChronicleBtn.onClick = function(_) {
+            #if js Browser.console.log("[TAB] 编年 onClick fired"); #end
+            switchRightTab("chronicle");
+        };
+        rightTabBar.addComponent(tabChronicleBtn);
+        Screen.instance.addComponent(rightTabBar);
 
-        uiWorldInfo = new Label();
-        uiWorldInfo.text = "第1年 第1日\n灵气浓度: 1.0\n修仙者: 6\n宗门: 8";
-        uiWorldInfo.styleString = "font-size:12px;color:#ccccaa;";
-        uiWorldInfo.width = 260;
-        worldPanel.addComponent(uiWorldInfo);
+        #if js Browser.console.log("[TAB] rightTabBar added to Screen, buttons:", tabWorldBtn, tabFactionBtn, tabChronicleBtn); #end
 
-        var logTitle = new Label();
-        logTitle.text = "--- 天道日志 ---";
-        logTitle.styleString = "font-size:13px;color:#ffaa00;";
-        worldPanel.addComponent(logTitle);
+        // === Heaps 原生 Interactive: 覆盖在 Tab 按钮上方, 绕过 HaxeUI 事件系统 ===
+        // HaxeUI 事件系统可能无法检测到这些按钮, 用 h2d.Interactive 直接捕获点击
+        var tabLabels = ["world", "faction", "chronicle"];
+        var tabNames = ["天道", "宗门", "编年"];
+        var btnW = 82; // 80 + 2 spacing
+        var tabX = width - 270;
+        var tabY = 4;
+        for (i in 0...3) {
+            var inter = new h2d.Interactive(80, 26, this);
+            inter.x = tabX + i * btnW;
+            inter.y = tabY;
+            // Heaps 中后添加的 Interactive 在事件处理中优先级更高, 这些 Interactive 在所有 HaxeUI 组件之后添加
+            var tabId = tabLabels[i];
+            var tabName = tabNames[i];
+            inter.onClick = function(e:hxd.Event) {
+                #if js Browser.console.log("[TAB-HEAPS] " + tabName + " clicked at", e.relX, e.relY); #end
+                switchRightTab(tabId);
+            };
+            #if js inter.onOver = function(e:hxd.Event) { Browser.console.log("[TAB-HEAPS] " + tabName + " mouseover"); }; #end
+            tabInteractives.push(inter);
+        }
+        #if js Browser.console.log("[TAB-HEAPS] 3 Interactive objects created at x:", tabX, "y:", tabY); #end
 
-        uiEventLog = new Label();
-        uiEventLog.text = "";
-        uiEventLog.styleString = "font-size:11px;color:#999999;";
-        uiEventLog.width = 260;
-        worldPanel.addComponent(uiEventLog);
-
-        Screen.instance.addComponent(worldPanel);
+        // 初始化 Tab 状态
+        switchRightTab("world");
 
         // === 底部技能栏 ===
         var skillContainer = new VBox();
@@ -559,14 +679,14 @@ class GameScene extends Scene {
         formationBar.left = 4;
         formationBar.top = 100;
 
-        var fmtTitle = new Label(); fmtTitle.text = "-- 阵法 --"; fmtTitle.styleString = "font-size:13px;color:#ffaa00;";
+        var fmtTitle = new Label(); fmtTitle.text = "-- 阵法 --"; fmtTitle.styleString = SX_SUBTITLE;
         formationBar.addComponent(fmtTitle);
 
         for (f in formationDefs) {
             var btn = new Button();
             btn.text = f.key + " " + f.name;
-            btn.width = 72; btn.height = 30;
-            btn.styleString = "font-size:11px;background-color:#2a1a0a;border-color:#aa6600;color:#ffcc88;";
+            btn.width = 84; btn.height = 34;
+            btn.styleString = SX_BTN;
             var fid = f.id;
             btn.onClick = function(_) { castFormation(fid); };
             uiFormationButtons.push(btn);
@@ -574,21 +694,107 @@ class GameScene extends Scene {
         }
         Screen.instance.addComponent(formationBar);
 
+        // === 时间控制按钮(左侧, 阵法栏下方) ===
+        var speedTitle = new Label(); speedTitle.text = "-- 时间 --"; speedTitle.styleString = SX_SUBTITLE;
+        speedTitle.left = 12;
+        speedTitle.top = 170 + 20 + 6 * 37 + 8;  // 阵法栏paddingTop(100)+title(20)+6行按钮+间距+8
+        Screen.instance.addComponent(speedTitle);
+
+        var speedBar = new VBox();
+        speedBar.verticalSpacing = 3;
+        speedBar.left = 12;
+        speedBar.top = 170 + 20 + 6 * 37 + 8 + 20;
+        var speedConfigs = [
+            {label: "暂停", scale: 0.0},
+            {label: "1x", scale: 1.0},
+            {label: "2x", scale: 2.0},
+            {label: "4x", scale: 4.0}
+        ];
+        for (cfg in speedConfigs) {
+            var btn = new Button();
+            btn.text = cfg.label;
+            btn.width = 84; btn.height = 30;
+            btn.styleString = SX_BTN;
+            var scale = cfg.scale;
+            btn.onClick = function(_) { setTimeScale(scale); };
+            uiSpeedButtons.push(btn);
+            speedBar.addComponent(btn);
+        }
+        Screen.instance.addComponent(speedBar);
+
+        // === 当前世界事件横幅(顶部中央, 醒目) ===
+        uiActiveEvent = new Label();
+        uiActiveEvent.text = "";
+        uiActiveEvent.styleString = "font-size:16px;color:#ff8866;font-weight:bold;background-color:#1a0808ee;border:2px solid #c8442a;border-radius:4px;padding:4px;text-align:center;";
+        uiActiveEvent.left = width / 2 - 180;
+        uiActiveEvent.top = 40;
+        uiActiveEvent.width = 360;
+        uiActiveEvent.height = 24;
+        Screen.instance.addComponent(uiActiveEvent);
+
+        // === NPC 详情浮窗(点击 NPC 弹出, 初始隐藏) ===
+        npcDetailPanel = new VBox();
+        npcDetailPanel.verticalSpacing = 4;
+        npcDetailPanel.left = 80;
+        npcDetailPanel.top = 80;
+        npcDetailPanel.width = 320;
+        npcDetailPanel.styleString = SX_PANEL;
+        npcDetailPanel.hidden = true;
+
+        var detailHeader = new HBox();
+        detailHeader.horizontalSpacing = 8;
+        var detailTitle = new Label();
+        detailTitle.text = "修士详情";
+        detailTitle.styleString = SX_TITLE;
+        detailTitle.width = 240;
+        detailHeader.addComponent(detailTitle);
+        npcDetailCloseBtn = new Button();
+        npcDetailCloseBtn.text = "×";
+        npcDetailCloseBtn.width = 30; npcDetailCloseBtn.height = 24;
+        npcDetailCloseBtn.styleString = SX_BTN_DANGER;
+        npcDetailCloseBtn.onClick = function(_) { closeNpcDetail(); };
+        detailHeader.addComponent(npcDetailCloseBtn);
+        npcDetailPanel.addComponent(detailHeader);
+
+        npcDetailLabel = new Label();
+        npcDetailLabel.text = "";
+        npcDetailLabel.styleString = SX_TEXT;
+        npcDetailLabel.width = 300;
+        npcDetailLabel.height = 360;
+        npcDetailPanel.addComponent(npcDetailLabel);
+
+        Screen.instance.addComponent(npcDetailPanel);
+
         // === 提示 ===
         uiInfo = new Label();
-        uiInfo.text = "WASD移动 | 空格普攻 | Q-P法术(左键瞄准/Tab锁定) | 1-5阵法\n左键=普攻/确认施法 | Tab=锁定敌人 | 右键=取消";
-        uiInfo.styleString = "font-size:12px;color:#888888;";
-        uiInfo.left = width - 210;
-        uiInfo.top = height - 80;
-        uiInfo.width = 200;
+        uiInfo.text = "WASD/右键点击 移动 | 空格普攻 | 左键点NPC查看详情 | Q-P法术 | 1-5阵法\nF1暂停 | F2=1x | F3=2x | F4=4x 时间加速";
+        uiInfo.styleString = SX_TEXT_DIM;
+        uiInfo.left = 10;
+        uiInfo.top = height - 50;
+        uiInfo.width = 380;
         Screen.instance.addComponent(uiInfo);
+
+        // 初始化按钮高亮
+        updateSpeedButtonHighlight();
+
+        // === 小地图画布(右下角, Heaps 原生 Graphics 不受镜头影响) ===
+        var minimapTitle = new Label();
+        minimapTitle.text = "▼ 天下堪舆图";
+        minimapTitle.styleString = "font-size:14px;color:#d4a04c;font-weight:bold;background:transparent;border:none;text-align:right;";
+        minimapTitle.left = width - 220;
+        minimapTitle.top = height - 242;
+        minimapTitle.width = 200;
+        Screen.instance.addComponent(minimapTitle);
+
+        minimapGraphics = new h2d.Graphics(this);
+        minimapBorder = new h2d.Graphics(this);
     }
 
     function createSkillButton(s:{key:String, name:String, skill:String, cd:Float, mpCost:Int}):Button {
         var btn = new Button();
         btn.text = s.name;
-        btn.width = 72; btn.height = 42;
-        btn.styleString = "font-size:11px;background-color:#1a1a3a;border-color:#4a4aaa;color:#ddddff;";
+        btn.width = 84; btn.height = 42;
+        btn.styleString = SX_BTN;
         var skillId = s.skill;
         var mpCost = s.mpCost;
         var cdTime = s.cd;
@@ -1044,6 +1250,418 @@ class GameScene extends Scene {
 
     function flashInfo(msg:String) { uiInfo.text = msg; }
 
+    // === 时间控制 ===
+    public function setTimeScale(scale:Float) {
+        timeScale = scale;
+        paused = (scale <= 0);
+        updateSpeedButtonHighlight();
+        if (paused) {
+            flashInfo("世界已暂停");
+        } else {
+            flashInfo("时间流速: " + scale + "x");
+        }
+    }
+
+    function updateSpeedButtonHighlight() {
+        for (i in 0...uiSpeedButtons.length) {
+            var btn = uiSpeedButtons[i];
+            var scales = [0.0, 1.0, 2.0, 4.0];
+            if (scales[i] == timeScale) {
+                btn.styleString = SX_BTN_HOT;
+            } else {
+                btn.styleString = SX_BTN;
+            }
+        }
+    }
+
+    // === 可折叠面板标题构造器 ===
+    // 返回一个带 ▼/▶ 切换的按钮, 点击切换 contents 的显隐
+    function makeCollapsibleTitle(titleText:String, contents:Array<Component>, width:Int = 260):Button {
+        var btn = new Button();
+        btn.text = "▼ " + titleText;
+        btn.styleString = "font-size:13px;color:#d4a04c;font-weight:bold;background:transparent;border:none;text-align:left;padding:2px;";
+        btn.width = width;
+        btn.height = 22;
+        btn.onClick = function(_) {
+            var collapsed = btn.text.charAt(0) == "▶";
+            btn.text = collapsed ? "▼ " + titleText : "▶ " + titleText;
+            for (c in contents) c.hidden = collapsed ? false : true;
+        };
+        return btn;
+    }
+
+    // === 检测鼠标是否在 HaxeUI 组件上 ===
+    // 用屏幕坐标范围判断, 避免 HaxeUI 内部 API 兼容问题
+    function isMouseOverUI():Bool {
+        var w = Window.getInstance();
+        var mx = w.mouseX;
+        var my = w.mouseY;
+        var sw = width;
+        var sh = height;
+
+        // 顶部状态栏 (y < 135)
+        if (my < 135) return true;
+        // 右侧 Tab 面板 (x > sw - 285)
+        if (mx > sw - 285) return true;
+        // 底部技能栏 + 提示 (y > sh - 95)
+        if (my > sh - 95) return true;
+        // 左侧阵法栏 (x < 135, y 在中间区域)
+        if (mx < 135 && my > 135 && my < sh - 95) return true;
+        // NPC 详情浮窗 (如果可见)
+        if (!npcDetailPanel.hidden) {
+            if (mx >= npcDetailPanel.left && mx <= npcDetailPanel.left + npcDetailPanel.width &&
+                my >= npcDetailPanel.top && my <= npcDetailPanel.top + npcDetailPanel.height) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // === 右侧 Tab 切换 ===
+    // 单 Label 方案: 只改 .text 和样式, 不增删组件
+    function switchRightTab(tab:String) {
+        #if js Browser.console.log("[TAB] switchRightTab called with:", tab, "| currentRightTab was:", currentRightTab); #end
+        currentRightTab = tab;
+
+        // 切换内容文本
+        if (tab == "faction") {
+            uiTabContent.text = factionTabText;
+            tabFactionBtn.styleString = SX_BTN_HOT;
+            tabWorldBtn.styleString = SX_BTN;
+            tabChronicleBtn.styleString = SX_BTN;
+        } else if (tab == "chronicle") {
+            uiTabContent.text = chronicleTabText;
+            tabChronicleBtn.styleString = SX_BTN_HOT;
+            tabWorldBtn.styleString = SX_BTN;
+            tabFactionBtn.styleString = SX_BTN;
+        } else {
+            uiTabContent.text = worldTabText;
+            tabWorldBtn.styleString = SX_BTN_HOT;
+            tabFactionBtn.styleString = SX_BTN;
+            tabChronicleBtn.styleString = SX_BTN;
+        }
+    }
+
+    // === NPC 详情浮窗 ===
+    // 在世界坐标 (wx, wy) 附近查找 NPC, 半径 r 内最近者
+    function findNpcAt(wx:Float, wy:Float, r:Float = 28):Entity {
+        var nearest:Entity = null;
+        var nearestDist = r * r;
+        for (e in engine.entities) {
+            if (!e.alive) continue;
+            if (e.isPlayer) continue;
+            var pos = e.get(PositionComp);
+            if (pos == null) continue;
+            var dx = pos.x - wx;
+            var dy = pos.y - wy;
+            var d = dx * dx + dy * dy;
+            if (d < nearestDist) {
+                nearestDist = d;
+                nearest = e;
+            }
+        }
+        return nearest;
+    }
+
+    function showNpcDetail(e:Entity) {
+        selectedNpcEntity = e;
+        npcDetailPanel.hidden = false;
+        updateNpcDetail();
+    }
+
+    function closeNpcDetail() {
+        npcDetailPanel.hidden = true;
+        selectedNpcEntity = null;
+    }
+
+    function updateNpcDetail() {
+        if (selectedNpcEntity == null || !selectedNpcEntity.alive) {
+            closeNpcDetail();
+            return;
+        }
+        var e = selectedNpcEntity;
+        var cult = e.get(CultivationComp);
+        var pos = e.get(PositionComp);
+        var fac = e.get(FactionComp);
+        var karma = e.get(KarmaComp);
+        var inv = e.get(InventoryComp);
+        var social = e.get(SocialComp);
+        var heritage = e.get(HeritageComp);
+        var crafting = e.get(CraftingComp);
+        var npcState = e.get(NPCStateComp);
+
+        var text = "";
+        text += "姓名: " + e.name + "\n";
+        if (npcState != null) {
+            var typeDesc = switch (npcState.npcType) {
+                case "moxiu": "魔修";
+                case "yaoshou": "妖兽";
+                case "mojiang": "魔将";
+                case "xiexian": "邪仙";
+                case "cultivator": "正道修士";
+                default: npcState.npcType;
+            };
+            text += "身份: " + typeDesc + "\n";
+        }
+        if (cult != null) {
+            text += "境界: " + cult.realmName + " (修为 " + Std.int(cult.exp) + "/" + Std.int(cult.expToNext) + ")\n";
+            text += "灵根: " + cult.spiritRootName + "·" + cult.spiritRootQualityName + "\n";
+            text += "气血: " + Std.int(cult.hp) + "/" + Std.int(cult.maxHp) + "\n";
+            text += "灵力: " + Std.int(cult.mp) + "/" + Std.int(cult.maxMp) + "\n";
+            text += "攻力: " + Std.int(cult.attackPower) + "  战力: " + Std.int(cult.getCombatPower()) + "\n";
+            text += "天赋: " + (Math.round(cult.talent * 100) / 100) + "  气运: " + (Math.round(cult.luck * 100) / 100) + "\n";
+            text += "年龄: " + Std.int(cult.age) + "/" + Std.int(cult.lifespan) + "岁\n";
+        }
+        if (fac != null) {
+            text += "势力: " + (fac.factionName != "" ? fac.factionName : "散修") + "\n";
+        }
+        if (heritage != null) {
+            text += "血脉: " + heritage.bloodline + "(第" + heritage.generation + "代)\n";
+            if (heritage.parentIds.length > 0) {
+                text += "出身: 道侣所生\n";
+            }
+            if (heritage.childrenIds.length > 0) {
+                text += "子嗣: " + heritage.childrenIds.length + "人\n";
+            }
+        }
+        if (social != null) {
+            var relParts:Array<String> = [];
+            if (social.spouseId != -1) {
+                var spouse = engine.getEntity(social.spouseId);
+                if (spouse != null) relParts.push("道侣:" + spouse.name);
+            }
+            if (social.masterId != -1) {
+                var master = engine.getEntity(social.masterId);
+                if (master != null) relParts.push("师父:" + master.name);
+            }
+            if (social.disciples.length > 0) relParts.push("弟子:" + social.disciples.length + "人");
+            if (social.allies.length > 0) relParts.push("盟友:" + social.allies.length + "人");
+            if (social.enemies.length > 0) relParts.push("仇敌:" + social.enemies.length + "人");
+            if (relParts.length > 0) text += "关系: " + relParts.join("  ") + "\n";
+        }
+        if (karma != null) {
+            text += "业障: " + karma.sinValue + "  功德: " + karma.meritValue + "\n";
+            if (karma.titles.length > 0) {
+                text += "称号: " + karma.titles.join(", ") + "\n";
+            }
+        }
+        if (inv != null) {
+            text += "灵石: " + inv.spiritStones + "  灵草: " + inv.herbs + "  材料: " + inv.materials + "\n";
+            if (inv.artifacts.length > 0) {
+                text += "法器: " + inv.artifacts.join(", ") + "\n";
+            }
+            var pillNames:Array<String> = [];
+            for (pName in inv.pills.keys()) pillNames.push(pName + "x" + inv.pills[pName]);
+            if (pillNames.length > 0) text += "丹药: " + pillNames.join(", ") + "\n";
+        }
+        if (crafting != null) {
+            if (crafting.alchemySkill > 0 || crafting.smithingSkill > 0) {
+                text += "炼丹:" + Std.int(crafting.alchemySkill) + " 炼器:" + Std.int(crafting.smithingSkill) + "\n";
+            }
+        }
+        if (pos != null) {
+            text += "坐标: (" + Std.int(pos.x) + ", " + Std.int(pos.y) + ")\n";
+        }
+        npcDetailLabel.text = text;
+    }
+
+    // === 渲染世界元素: 灵草资源点 + 秘境 ===
+    function renderWorldElements() {
+        // --- 灵草资源点 ---
+        // 同步图形对象数量
+        while (herbNodeGraphics.length < engine.spiritHerbNodes.length) {
+            var g = new h2d.Graphics(formationLayer);
+            herbNodeGraphics.push(g);
+        }
+        while (herbNodeGraphics.length > engine.spiritHerbNodes.length) {
+            var g = herbNodeGraphics.pop();
+            if (g.parent != null) g.remove();
+        }
+        for (i in 0...engine.spiritHerbNodes.length) {
+            var node = engine.spiritHerbNodes[i];
+            var g = herbNodeGraphics[i];
+            g.clear();
+            if (!node.alive || node.herbs < 0.5) {
+                g.visible = false;
+                continue;
+            }
+            g.visible = true;
+            g.x = node.x;
+            g.y = node.y;
+            // 灵草簇: 绿色圆点 + 光晕
+            var ratio = node.herbs / node.maxHerbs;
+            var size = 4 + ratio * 6;
+            g.beginFill(0x22aa44, 0.25);
+            drawCircleOn(g, 0, 0, size + 6);
+            g.endFill();
+            g.beginFill(0x44ff66, 0.7);
+            drawCircleOn(g, 0, 0, size);
+            g.endFill();
+            // 中心高亮
+            g.beginFill(0xaaeeaa, 0.9);
+            drawCircleOn(g, 0, 0, size * 0.4);
+            g.endFill();
+        }
+
+        // --- 秘境 ---
+        while (secretRealmGraphics.length < engine.secretRealms.length) {
+            var g = new h2d.Graphics(formationLayer);
+            secretRealmGraphics.push(g);
+        }
+        while (secretRealmGraphics.length > engine.secretRealms.length) {
+            var g = secretRealmGraphics.pop();
+            if (g.parent != null) g.remove();
+        }
+        for (i in 0...engine.secretRealms.length) {
+            var realm = engine.secretRealms[i];
+            var g = secretRealmGraphics[i];
+            g.clear();
+            if (!realm.active) {
+                g.visible = false;
+                continue;
+            }
+            g.visible = true;
+            g.x = realm.x;
+            g.y = realm.y;
+            // 秘境光环: 旋转的金色光圈
+            var phase = elapsed * 2;
+            var color = switch (realm.heritageType) {
+                case "exp": 0xffaa44;
+                case "artifact": 0x44aaff;
+                case "root": 0xff44ff;
+                default: 0xffaa44;
+            };
+            g.lineStyle(3, color, 0.8);
+            drawCircleOn(g, 0, 0, realm.radius);
+            g.lineStyle(1, color, 0.4);
+            drawCircleOn(g, 0, 0, realm.radius + 10 + Math.sin(phase) * 5);
+            // 中心符文
+            g.beginFill(color, 0.3);
+            drawCircleOn(g, 0, 0, realm.radius * 0.5);
+            g.endFill();
+            // 旋转的符文线
+            for (k in 0...6) {
+                var a = phase + k * Math.PI / 3;
+                g.lineStyle(2, color, 0.6);
+                g.moveTo(Math.cos(a) * realm.radius * 0.6, Math.sin(a) * realm.radius * 0.6);
+                g.lineTo(Math.cos(a) * realm.radius * 0.9, Math.sin(a) * realm.radius * 0.9);
+            }
+        }
+
+        // === 渲染小地图 ===
+        renderMinimap();
+    }
+
+    // === 小地图渲染: 世界全貌缩略 ===
+    function renderMinimap() {
+        var g = minimapGraphics;
+        if (g == null) return;
+        g.clear();
+        var mapSize = 200;
+        var mapX = width - mapSize - 20;
+        var mapY = height - mapSize - 20;
+        g.x = mapX;
+        g.y = mapY;
+
+        var sx = mapSize / engine.worldWidth;
+        var sy = mapSize / engine.worldHeight;
+
+        // 背景 + 边框(卷轴风)
+        g.beginFill(0x0a0a14, 0.88);
+        g.drawRect(0, 0, mapSize, mapSize);
+        g.endFill();
+        g.lineStyle(2, 0x8b6914, 1);
+        g.drawRect(0, 0, mapSize, mapSize);
+
+        // 灵脉(金色光晕)
+        for (v in engine.spiritVeins) {
+            var vx = v.x * sx;
+            var vy = v.y * sy;
+            g.beginFill(0xd4a04c, 0.2);
+            drawCircleOn(g, vx, vy, 8);
+            g.endFill();
+            g.beginFill(0xd4a04c, 0.9);
+            drawCircleOn(g, vx, vy, 3);
+            g.endFill();
+        }
+
+        // 灵草点(绿色)
+        for (node in engine.spiritHerbNodes) {
+            if (!node.alive || node.herbs < 1) continue;
+            g.beginFill(0x44aa44, 0.7);
+            g.drawRect(node.x * sx - 1, node.y * sy - 1, 2, 2);
+            g.endFill();
+        }
+
+        // 秘境(金色闪烁)
+        for (realm in engine.secretRealms) {
+            if (!realm.active) continue;
+            var phase = elapsed * 3;
+            var rx = realm.x * sx;
+            var ry = realm.y * sy;
+            g.beginFill(0xffaa44, 0.4);
+            drawCircleOn(g, rx, ry, 5 + Math.sin(phase) * 2);
+            g.endFill();
+            g.lineStyle(1, 0xffaa44, 0.8);
+            drawCircleOn(g, rx, ry, 8);
+        }
+
+        // 妖潮/宗门大战区域(红色半透明)
+        for (evt in engine.activeCataclysms) {
+            if (evt.type == "BeastTide" || evt.type == "FactionWar") {
+                var ex = evt.x * sx;
+                var ey = evt.y * sy;
+                g.beginFill(0xc8442a, 0.3);
+                drawCircleOn(g, ex, ey, 14);
+                g.endFill();
+                g.lineStyle(1, 0xc8442a, 0.7);
+                drawCircleOn(g, ex, ey, 14);
+            }
+        }
+
+        // NPC (按类型颜色)
+        for (e in engine.entities) {
+            if (!e.alive) continue;
+            var pos = e.get(PositionComp);
+            if (pos == null) continue;
+            var px = pos.x * sx;
+            var py = pos.y * sy;
+            if (e.isPlayer) {
+                // 玩家: 白色三角形(用多边形绘制)
+                g.beginFill(0xffffff, 1);
+                g.moveTo(px, py - 4);
+                g.lineTo(px - 3, py + 3);
+                g.lineTo(px + 3, py + 3);
+                g.lineTo(px, py - 4);
+                g.endFill();
+            } else {
+                var npcState = e.get(NPCStateComp);
+                var color = 0x888888;
+                if (npcState != null) {
+                    color = switch (npcState.npcType) {
+                        case "cultivator": 0x4a7ac8; // 正道蓝
+                        case "moxiu": 0xc84444;       // 魔修红
+                        case "yaoshou": 0x8a6a3a;     // 妖兽棕
+                        case "mojiang": 0xc8442a;     // 魔将橙红
+                        case "xiexian": 0xaa44aa;     // 邪仙紫
+                        default: 0x888888;
+                    };
+                }
+                g.beginFill(color, 0.9);
+                drawCircleOn(g, px, py, 1.5);
+                g.endFill();
+            }
+        }
+
+        // 镜头视野矩形(白色虚框)
+        var camLeft = camX * sx;
+        var camTop = camY * sy;
+        var camW = width * sx;
+        var camH = height * sy;
+        g.lineStyle(1, 0xffffff, 0.5);
+        g.drawRect(camLeft, camTop, camW, camH);
+    }
+
     public function spawnDamageNumber(x:Float, y:Float, dmg:Int, color:Int) {
         var p = getParticle();
         p.x = x; p.y = y;
@@ -1123,11 +1741,18 @@ class GameScene extends Scene {
         bgTime += dt;
         updateBackground(dt);
 
-        // === 驱动世界引擎 ===
-        engine.update(dt);
+        // === 驱动世界引擎(应用时间倍率) ===
+        // 暂停时引擎不推进, 但玩家输入/镜头/UI 仍响应(观察者模式)
+        elapsed += dt;
+        if (!paused) {
+            engine.update(dt * timeScale);
+        }
 
         // === 同步渲染: 遍历世界实体, 更新对应的渲染对象 ===
         syncRender();
+
+        // === 渲染世界元素: 灵草资源点、秘境 ===
+        renderWorldElements();
 
         // 粒子更新
         for (p in particles) {
@@ -1256,20 +1881,51 @@ class GameScene extends Scene {
     function handleInput(dt:Float) {
         var pos = playerEntity.get(PositionComp);
         if (pos == null) return;
+
+        // 检测鼠标是否在 HaxeUI 组件上(按钮/面板等), 若是则跳过游戏鼠标操作
+        var mouseOverUI = isMouseOverUI();
+
+        // === 时间控制快捷键(总是响应, 即使暂停) ===
+        if (Key.isPressed(Key.F1)) setTimeScale(paused ? 1.0 : 0.0);
+        if (Key.isPressed(Key.F2)) setTimeScale(1.0);
+        if (Key.isPressed(Key.F3)) setTimeScale(2.0);
+        if (Key.isPressed(Key.F4)) setTimeScale(4.0);
+
         var speed = 350; // pixels per second
 
         // 玩家移动: 直接更新位置(实时响应, 不等 tick)
         pos.vx = 0;
         pos.vy = 0;
-        if (Key.isDown(Key.W) || Key.isDown(Key.UP)) pos.vy -= speed;
-        if (Key.isDown(Key.S) || Key.isDown(Key.DOWN)) pos.vy += speed;
-        if (Key.isDown(Key.A) || Key.isDown(Key.LEFT)) pos.vx -= speed;
-        if (Key.isDown(Key.D) || Key.isDown(Key.RIGHT)) pos.vx += speed;
+        var manualInput = false;
+        if (Key.isDown(Key.W) || Key.isDown(Key.UP)) { pos.vy -= speed; manualInput = true; }
+        if (Key.isDown(Key.S) || Key.isDown(Key.DOWN)) { pos.vy += speed; manualInput = true; }
+        if (Key.isDown(Key.A) || Key.isDown(Key.LEFT)) { pos.vx -= speed; manualInput = true; }
+        if (Key.isDown(Key.D) || Key.isDown(Key.RIGHT)) { pos.vx += speed; manualInput = true; }
+
+        // 手动操作取消自动寻路
+        if (manualInput) isAutoMoving = false;
+
+        // 右键自动寻路(暂停时也响应, 方便观察者移动)
+        if (isAutoMoving) {
+            var dx = moveTargetX - pos.x;
+            var dy = moveTargetY - pos.y;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 10) {
+                isAutoMoving = false;
+            } else {
+                pos.vx = (dx / dist) * speed;
+                pos.vy = (dy / dist) * speed;
+            }
+        }
+
         pos.x += pos.vx * dt;
         pos.y += pos.vy * dt;
         // 玩家限制在世界边界内
         pos.x = Math.clamp(pos.x, 30, engine.worldWidth - 30);
         pos.y = Math.clamp(pos.y, 30, engine.worldHeight - 30);
+
+        // 暂停时只允许移动 + 时间控制, 跳过施法/普攻
+        if (paused) return;
 
         if (Key.isPressed(Key.Q)) castSpell("fireball", 30, 1.5);
         if (Key.isPressed(Key.F)) castSpell("thunder", 50, 2.0);
@@ -1292,7 +1948,7 @@ class GameScene extends Scene {
 
         // === 法术目标选择 ===
         if (pendingSpell != null) {
-            // 瞄准模式: 左键确认释放
+            // 瞄准模式: 左键确认释放(不受 UI 区域限制, 玩家已明确要施法)
             if (Key.isPressed(Key.MOUSE_LEFT)) {
                 executeSpellCast(camMouseX, camMouseY);
             }
@@ -1306,13 +1962,26 @@ class GameScene extends Scene {
                 }
             }
             // 右键/Esc: 取消
-            if (Key.isPressed(Key.MOUSE_RIGHT) || Key.isPressed(Key.ESCAPE)) {
+            if (Key.isPressed(Key.ESCAPE) || Key.isPressed(Key.MOUSE_RIGHT)) {
                 cancelTargeting();
                 flashInfo("已取消施法");
             }
         } else {
-            // 非瞄准模式: 左键 = 普攻
-            if (Key.isPressed(Key.MOUSE_LEFT)) normalAttack();
+            // 非瞄准模式: 左键点击 NPC = 查看详情, 左键空白 = 普攻, 右键 = 移动
+            // 鼠标在 UI 上时跳过所有游戏鼠标操作
+            if (!mouseOverUI && Key.isPressed(Key.MOUSE_LEFT)) {
+                var clickedNpc = findNpcAt(camMouseX, camMouseY);
+                if (clickedNpc != null) {
+                    showNpcDetail(clickedNpc);
+                } else {
+                    normalAttack();
+                }
+            }
+            if (!mouseOverUI && Key.isPressed(Key.MOUSE_RIGHT)) {
+                moveTargetX = camMouseX;
+                moveTargetY = camMouseY;
+                isAutoMoving = true;
+            }
         }
     }
 
@@ -1338,10 +2007,13 @@ class GameScene extends Scene {
         // 世界信息
         var snap = engine.lastSnapshot;
         if (snap != null) {
-            uiWorldInfo.text = "第" + snap.worldYear + "年 第" + snap.worldDay + "日\n" +
+            var speedTag = paused ? "已暂停" : (timeScale + "x");
+            worldTabText = "第" + snap.worldYear + "年 第" + snap.worldDay + "日 [" + speedTag + "]\n" +
                 "灵气浓度: " + Std.string(snap.globalSpiritDensity).substr(0, 4) + "\n" +
-                "修仙者: " + snap.aliveCount + "\n" +
-                "宗门: " + snap.factionCount;
+                "修仙者: " + snap.aliveCount + "/" + engine.maxEntities + "\n" +
+                "宗门: " + snap.factionCount + "\n" +
+                "飞升: " + engine.ascendedCount + "人\n" +
+                "--- 天道日志 ---\n";
         }
 
         // 事件日志(最近5条)
@@ -1350,7 +2022,57 @@ class GameScene extends Scene {
         for (ev in recent) {
             logText += ev.desc + "\n";
         }
-        uiEventLog.text = logText;
+        worldTabText += logText;
+
+        // === 势力面板 ===
+        factionTabText = "--- 八大宗门 ---\n";
+        for (f in engine.factions) {
+            var status = f.alive ? "●" : "×";
+            var align = f.alignment == "righteous" ? "正" : "魔";
+            factionTabText += status + " [" + align + "] " + f.name + " " + f.memberCount + "人\n";
+        }
+
+        // === 编年史: 筛选重大事件 ===
+        var chronicleTypes = ["Birth", "Ascension", "BeastTide", "SecretRealm", "FactionWar",
+            "SpiritSurge", "HeritageTransfer", "TribulationSuccess", "TribulationDeath",
+            "FactionFall", "Marry", "TakeDisciple", "LightningTribulation", "HeartDemonTribulation",
+            "AscensionSurge", "SecretRealmClose", "FactionWarEnd", "SpiritSurgeEnd"];
+        var chronicleEvents = engine.eventLog.filter(function(e) {
+            return chronicleTypes.indexOf(e.type) >= 0;
+        });
+        chronicleTabText = "--- 天道编年史 ---\n";
+        var recentChron = chronicleEvents.slice(-3);
+        recentChron.reverse();
+        for (ev in recentChron) {
+            var desc = ev.desc;
+            if (desc.length > 30) desc = desc.substr(0, 28) + "...";
+            chronicleTabText += "[D" + ev.day + "] " + desc + "\n";
+        }
+
+        // 同步到当前显示的 Tab
+        if (currentRightTab == "faction") {
+            uiTabContent.text = factionTabText;
+        } else if (currentRightTab == "chronicle") {
+            uiTabContent.text = chronicleTabText;
+        } else {
+            uiTabContent.text = worldTabText;
+        }
+
+        // === 当前进行中的世界事件横幅 ===
+        var eventText = "";
+        for (evt in engine.activeCataclysms) {
+            eventText += "【" + evt.desc + "】 ";
+        }
+        if (eventText == "") {
+            uiActiveEvent.text = "";
+            uiActiveEvent.visible = false;
+        } else {
+            uiActiveEvent.text = "⚠ " + eventText;
+            uiActiveEvent.visible = true;
+        }
+
+        // === 实时更新 NPC 详情浮窗(如果打开) ===
+        if (!npcDetailPanel.hidden) updateNpcDetail();
     }
 
     function updateSkillCooldowns() {

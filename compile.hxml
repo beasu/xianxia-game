@@ -2,8 +2,8 @@
 -lib heaps
 -lib haxeui-heaps
 -D resourcesPath=res
-
-# --- JS target (primary, runs in browser via WebGL) ---
+-D heaps=nekoui
 -main Main
 -js bin/xianxia.js
 -D js-es=6
+-D expose=com.xianxia

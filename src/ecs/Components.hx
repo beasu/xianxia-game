@@ -39,6 +39,8 @@ class CultivationComp implements IComponent {
     public var age:Float = 16;           // 当前年龄
     public var talent:Float = 1.0;       // 天赋倍率
     public var luck:Float = 1.0;         // 气运值
+    public var externalPowerMul:Float = 1.0; // 外部战力倍率(法器/丹药等系统更新)
+    public var ascended:Bool = false;    // 是否已飞升(脱离世界)
 
     public function new() {}
 
@@ -73,7 +75,7 @@ class CultivationComp implements IComponent {
     }
 
     public function getCombatPower():Float {
-        return (attackPower * (1 + realmIndex * 0.5)) * (hp / maxHp) * talent * luck;
+        return (attackPower * (1 + realmIndex * 0.5)) * (hp / maxHp) * talent * luck * externalPowerMul;
     }
 }
 
@@ -156,10 +158,54 @@ class MemoryRecord {
 // --- 背包/物品组件 ---
 class InventoryComp implements IComponent {
     public var spiritStones:Int = 0;     // 灵石(通用货币)
-    public var pills:Map<String, Int> = []; // 丹药库存
-    public var artifacts:Array<String> = []; // 法器
+    public var pills:Map<String, Int> = []; // 丹药库存: name -> 数量
+    public var artifacts:Array<String> = []; // 法器(已获得)
     public var herbs:Int = 0;            // 灵草数量
     public var materials:Int = 0;        // 炼器材料
+    public var equippedArtifact:String = ""; // 当前装备的法器名(影响战力)
+    public var equippedArtifactBonus:Float = 0; // 装备法器的战力倍率
+
+    public function new() {}
+
+    // 添加丹药(自动累加)
+    public function addPill(name:String, count:Int = 1):Void {
+        if (!pills.exists(name)) pills[name] = 0;
+        pills[name] += count;
+    }
+
+    // 消耗丹药, 数量不足返回 false
+    public function usePill(name:String, count:Int = 1):Bool {
+        if (!pills.exists(name) || pills[name] < count) return false;
+        pills[name] -= count;
+        if (pills[name] <= 0) pills.remove(name);
+        return true;
+    }
+}
+
+// --- 血脉传承组件 (LifecycleAndHeritageSystem 使用) ---
+// 记录实体的血脉来源、后代、传承链, 让世界形成真正的家族/师门谱系
+class HeritageComp implements IComponent {
+    public var parentIds:Array<Int> = [];   // 父母实体ID(0=自然诞生, 2个=道侣所生)
+    public var childrenIds:Array<Int> = []; // 子女实体ID
+    public var bloodline:String = "凡民";   // 血脉: 凡民/灵裔/仙骨/神裔(影响初始天赋)
+    public var generation:Int = 1;          // 世代(1=开天辟地第一代, 子代递增)
+    public var birthDay:Int = 0;            // 出生日(世界日)
+    public var heritageCount:Int = 0;       // 已传承次数(死亡时传给下一代+1)
+    public var awaitingInheritance:Bool = false; // 死亡时是否已触发传承(避免重复)
+
+    public function new() {}
+}
+
+// --- 炼制能力组件 (CraftingEconomySystem 使用) ---
+// 跟踪实体在炼丹/炼器上的熟练度, 影响产出品质与成功率
+class CraftingComp implements IComponent {
+    public var alchemySkill:Float = 0;      // 炼丹熟练度(0-100)
+    public var smithingSkill:Float = 0;     // 炼器熟练度(0-100)
+    public var alchemyCooldown:Float = 0;   // 炼丹冷却(秒)
+    public var smithingCooldown:Float = 0;  // 炼器冷却(秒)
+    public var craftingProgress:Float = 0;  // 当前炼制进度(0-1)
+    public var craftingType:String = "";    // 当前炼制类型: "alchemy"/"smithing"/""
+    public var craftingRecipe:String = "";  // 当前配方名
 
     public function new() {}
 }

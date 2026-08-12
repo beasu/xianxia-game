@@ -51,6 +51,18 @@ class WorldEngine {
     public var marketItems:Array<MarketItem> = [];
     public var nextAuctionDay:Int = 30;  // 下次拍卖会日期
 
+    // --- 灵草资源点(CraftingEconomySystem 使用) ---
+    public var spiritHerbNodes:Array<SpiritHerbNode> = [];
+
+    // --- 秘境(WorldCataclysmSystem 使用) ---
+    public var secretRealms:Array<SecretRealm> = [];
+
+    // --- 进行中的大型世界事件 ---
+    public var activeCataclysms:Array<CataclysmEvent> = [];
+
+    // --- 飞升统计(LifecycleAndHeritageSystem 维护) ---
+    public var ascendedCount:Int = 0;
+
     // --- 世界配置 ---
     public var worldWidth:Float;
     public var worldHeight:Float;
@@ -287,26 +299,36 @@ class WorldEngine {
     }
 
     // --- 生成随机 NPC ---
-    public function spawnRandomNPC():Entity {
+    // forcedType/forcedX/forcedY 可选, 用于妖潮等系统指定生成参数
+    public function spawnRandomNPC(?forcedType:String, ?forcedX:Float, ?forcedY:Float):Entity {
         var e = new Entity();
         var npcState = new NPCStateComp();
 
-        // 随机类型
-        var roll = Math.random(100);
-        if (roll < 40) npcState.npcType = "moxiu";
-        else if (roll < 60) npcState.npcType = "yaoshou";
-        else if (roll < 75) npcState.npcType = "mojiang";
-        else if (roll < 85) npcState.npcType = "xiexian";
-        else npcState.npcType = "cultivator"; // 正道修士
+        // 随机类型(或外部指定)
+        if (forcedType != null) {
+            npcState.npcType = forcedType;
+        } else {
+            var roll = Math.random(100);
+            if (roll < 40) npcState.npcType = "moxiu";
+            else if (roll < 60) npcState.npcType = "yaoshou";
+            else if (roll < 75) npcState.npcType = "mojiang";
+            else if (roll < 85) npcState.npcType = "xiexian";
+            else npcState.npcType = "cultivator"; // 正道修士
+        }
 
         // 位置
         var pos = new PositionComp();
-        var side = Std.int(Math.random(4));
-        switch (side) {
-            case 0: pos.x = Math.random(worldWidth); pos.y = -30;
-            case 1: pos.x = worldWidth + 30; pos.y = Math.random(worldHeight);
-            case 2: pos.x = Math.random(worldWidth); pos.y = worldHeight + 30;
-            case 3: pos.x = -30; pos.y = Math.random(worldHeight);
+        if (forcedX != null && forcedY != null) {
+            pos.x = forcedX;
+            pos.y = forcedY;
+        } else {
+            var side = Std.int(Math.random(4));
+            switch (side) {
+                case 0: pos.x = Math.random(worldWidth); pos.y = -30;
+                case 1: pos.x = worldWidth + 30; pos.y = Math.random(worldHeight);
+                case 2: pos.x = Math.random(worldWidth); pos.y = worldHeight + 30;
+                case 3: pos.x = -30; pos.y = Math.random(worldHeight);
+            }
         }
         npcState.homeX = pos.x;
         npcState.homeY = pos.y;
@@ -402,7 +424,40 @@ class WorldEngine {
             social.socialRole = "loner";
         }
 
-        e.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npcState).add(social);
+        // 血脉传承组件: 自然诞生的 NPC 默认凡民血脉
+        var heritage = new HeritageComp();
+        heritage.bloodline = "凡民";
+        heritage.generation = 1;
+        heritage.birthDay = worldDay;
+        // 少数天选者出生即有仙骨/灵裔血脉
+        var bloodRoll = Math.random();
+        if (bloodRoll > 0.97) {
+            heritage.bloodline = "神裔";
+            cult.talent *= 2.0;
+        } else if (bloodRoll > 0.9) {
+            heritage.bloodline = "仙骨";
+            cult.talent *= 1.5;
+        } else if (bloodRoll > 0.75) {
+            heritage.bloodline = "灵裔";
+            cult.talent *= 1.2;
+        }
+
+        // 炼制能力组件: 一部分 NPC 天生有炼制天赋
+        var crafting = new CraftingComp();
+        if (npcState.npcType == "cultivator") {
+            // 正道修士更可能擅长炼丹
+            crafting.alchemySkill = Math.random() < 0.4 ? randRange(10, 40) : 0;
+            crafting.smithingSkill = Math.random() < 0.3 ? randRange(5, 25) : 0;
+        } else if (npcState.npcType == "mojiang") {
+            // 魔将更可能擅长炼器
+            crafting.smithingSkill = Math.random() < 0.5 ? randRange(15, 50) : 0;
+            crafting.alchemySkill = Math.random() < 0.2 ? randRange(5, 20) : 0;
+        } else {
+            crafting.alchemySkill = Math.random() < 0.2 ? randRange(0, 15) : 0;
+            crafting.smithingSkill = Math.random() < 0.2 ? randRange(0, 15) : 0;
+        }
+
+        e.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npcState).add(social).add(heritage).add(crafting);
 
         addEntity(e);
 
@@ -458,6 +513,40 @@ class WorldEngine {
             f.alignment = i < 4 ? "righteous" : "demonic"; // 前4个正道, 后4个魔道
             factions.push(f);
         }
+    }
+
+    // --- 初始化灵草资源点(在每个灵脉附近撒若干点) ---
+    public function initSpiritHerbNodes():Void {
+        for (v in spiritVeins) {
+            for (i in 0...5) {
+                var node = new SpiritHerbNode(spiritHerbNodes.length);
+                var angle = Math.random() * Math.PI * 2;
+                var dist = randRange(50, 200);
+                node.x = v.x + Math.cos(angle) * dist;
+                node.y = v.y + Math.sin(angle) * dist;
+                node.x = Math.clamp(node.x, 50, worldWidth - 50);
+                node.y = Math.clamp(node.y, 50, worldHeight - 50);
+                node.maxHerbs = Std.int(randRange(5, 15));
+                node.herbs = node.maxHerbs;
+                node.alive = true;
+                spiritHerbNodes.push(node);
+            }
+        }
+    }
+
+    // --- 按类型生成 NPC(妖潮/秘境等系统使用) ---
+    public function spawnNPCOfType(type:String, x:Float, y:Float):Entity {
+        return spawnRandomNPC(type, x, y);
+    }
+
+    // --- 获取生态引擎引用(供其他系统查询网格灵气浓度) ---
+    public function getEcologySystem():WorldEcologySystem {
+        for (s in systems) {
+            if (Type.getClass(s) == WorldEcologySystem) {
+                return cast s;
+            }
+        }
+        return null;
     }
 
     // --- 辅助 ---
@@ -638,5 +727,57 @@ class PlayerCommand {
 
     public function new(type:IntentType) {
         this.type = type;
+    }
+}
+
+// ============================================================
+//  灵草资源点 (CraftingEconomySystem 使用)
+// ============================================================
+class SpiritHerbNode {
+    public var id:Int;
+    public var x:Float;
+    public var y:Float;
+    public var herbs:Float;          // 当前灵草储量(连续值, 采集时取整)
+    public var maxHerbs:Float;       // 最大储量
+    public var alive:Bool = true;
+    public var growthTimer:Float = 0;
+    public var depletedTimer:Float = 0;
+
+    public function new(id:Int) {
+        this.id = id;
+    }
+}
+
+// ============================================================
+//  秘境 (WorldCataclysmSystem 使用)
+// ============================================================
+class SecretRealm {
+    public var x:Float;
+    public var y:Float;
+    public var radius:Float;
+    public var remainTime:Float;     // 剩余存在时间(秒)
+    public var heritageValue:Int;    // 传承价值
+    public var heritageType:String;  // exp/artifact/root
+    public var active:Bool = true;
+    public var benefitedIds:Array<Int> = []; // 已获得传承的实体ID
+
+    public function new() {}
+}
+
+// ============================================================
+//  进行中的大型世界事件 (WorldCataclysmSystem 使用)
+// ============================================================
+class CataclysmEvent {
+    public var type:String;          // BeastTide/SecretRealm/SpiritSurge/FactionWar
+    public var startDay:Int;
+    public var duration:Float;       // 持续时间(秒)
+    public var desc:String;
+    public var x:Float = 0;
+    public var y:Float = 0;
+    public var finished:Bool = false;
+
+    public function new(type:String, startDay:Int) {
+        this.type = type;
+        this.startDay = startDay;
     }
 }
