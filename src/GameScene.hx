@@ -328,7 +328,16 @@ class GameScene extends Scene {
         crafting.alchemySkill = 30; // 玩家初始有一定炼丹基础
         crafting.smithingSkill = 20;
 
-        playerEntity.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npc).add(social).add(heritage).add(crafting).add(new KarmaChainComp());
+        // 玩家灵力物理组件(天命之子, 灵压和神识更强)
+        var spiritPhys = new SpiritPhysicsComp();
+        spiritPhys.spiritPressure = 10 * Math.pow(3, cult.realmIndex);
+        spiritPhys.pressureRadius = 120 + cult.realmIndex * 40;
+        spiritPhys.spiritSenseRange = 400 + cult.realmIndex * 100;
+        spiritPhys.resonanceElement = cult.spiritRoot;
+        spiritPhys.shieldMaxStrength = 100;
+        spiritPhys.shieldRegenRate = 10;
+
+        playerEntity.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npc).add(social).add(heritage).add(crafting).add(new KarmaChainComp()).add(spiritPhys);
         engine.addEntity(playerEntity);
 
         // 创建玩家渲染对象

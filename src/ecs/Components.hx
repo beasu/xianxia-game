@@ -392,6 +392,70 @@ class ReincarnationComp implements IComponent {
     public function new() {}
 }
 
+// ============================================================
+//  === 修仙物理组件 (PhysicsSystem 使用) ===
+// ============================================================
+
+// --- 灵力物理组件 ---
+// 修仙世界的"物理"不遵循牛顿力学, 而是灵气动力学:
+// 1. 灵压(Spirit Pressure): 高境界者周围的灵气密度场, 低境界者在此区域内移动受阻
+// 2. 御剑飞行(Sword Flight): 修士可消耗灵力进入飞行状态, 忽略地形摩擦
+// 3. 神识(Spirit Sense): 修士的精神感知范围, 可探测隐身/预判攻击
+// 4. 元素共振(Elemental Resonance): 灵根与周围环境的元素共鸣, 影响法术威力
+// 5. 空间折叠(Space Folding): 高境界修士可扭曲局部空间, 改变碰撞和距离
+// 6. 因果引力(Karma Gravity): 业障重者会被因果之力牵引向危险区域
+// 7. 护体灵光(Spirit Shield): 修士的灵力护盾, 抵消物理冲击
+class SpiritPhysicsComp implements IComponent {
+    // === 灵压 ===
+    public var spiritPressure:Float = 0;        // 灵压值(由境界决定, 练气=10, 每境界×3)
+    public var pressureRadius:Float = 100;      // 灵压影响半径
+    public var pressureEnabled:Bool = true;     // 是否释放灵压(可主动收束)
+
+    // === 御剑飞行 ===
+    public var isFlying:Bool = false;           // 是否在御剑飞行
+    public var flySpeedMul:Float = 2.0;         // 飞行速度倍率
+    public var flyMpCostPerSec:Float = 5;       // 飞行每秒灵力消耗
+    public var minFlyRealm:Int = 2;             // 最低飞行境界(筑基期)
+
+    // === 神识 ===
+    public var spiritSenseRange:Float = 300;    // 神识感知半径
+    public var spiritSenseActive:Bool = true;   // 是否展开神识
+    public var detectedHidden:Bool = false;     // 本帧是否探测到隐身目标
+
+    // === 元素共振 ===
+    public var resonanceElement:String = "";    // 当前共振元素(由灵根决定)
+    public var resonanceStrength:Float = 0;     // 共振强度(0-1, 与环境匹配度)
+    public var resonanceBonus:Float = 1.0;      // 当前法术增幅倍率
+
+    // === 空间折叠 ===
+    public var spaceFoldRadius:Float = 0;       // 空间折叠半径(0=未激活)
+    public var spaceFoldStrength:Float = 0;     // 折叠强度(0-1, 影响距离缩放)
+    public var spaceFoldMpCostPerSec:Float = 20; // 空间折叠每秒灵力消耗
+
+    // === 护体灵光 ===
+    public var shieldActive:Bool = false;       // 护体灵光是否激活
+    public var shieldStrength:Float = 0;        // 护盾强度(吸收伤害值)
+    public var shieldMaxStrength:Float = 0;     // 护盾最大强度
+    public var shieldRegenRate:Float = 0;       // 护盾恢复速率(每秒)
+    public var shieldMpCostPerSec:Float = 3;    // 维持护盾每秒灵力消耗
+
+    // === 因果引力 ===
+    public var karmaGravity:Float = 0;          // 因果引力值(由业障决定)
+    public var karmaPullX:Float = 0;            // 因果牵引方向X
+    public var karmaPullY:Float = 0;            // 因果牵引方向Y
+
+    // === 状态效果(临时) ===
+    public var frozenTimer:Float = 0;           // 冰冻剩余时间(无法移动)
+    public var burnTimer:Float = 0;             // 燃烧剩余时间(持续掉血)
+    public var burnDps:Float = 0;               // 燃烧每秒伤害
+    public var stunTimer:Float = 0;             // 眩晕剩余时间(无法行动)
+    public var slowTimer:Float = 0;             // 减速剩余时间
+    public var slowFactor:Float = 1.0;          // 减速系数(0.5=半速)
+    public var levitateTimer:Float = 0;         // 凌空剩余时间(无视地形)
+
+    public function new() {}
+}
+
 // --- 因果链记录 (挂在 KarmaComp 的补充, 或独立组件) ---
 class KarmaChainComp implements IComponent {
     public var killTargets:Array<Int> = [];      // 我杀过的人的ID列表

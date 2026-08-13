@@ -465,7 +465,14 @@ class WorldEngine {
             crafting.smithingSkill = Math.random() < 0.2 ? randRange(0, 15) : 0;
         }
 
-        e.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npcState).add(social).add(heritage).add(crafting).add(new KarmaChainComp());
+        // 灵力物理组件
+        var spiritPhys = new SpiritPhysicsComp();
+        spiritPhys.spiritPressure = 10 * Math.pow(3, cult.realmIndex);
+        spiritPhys.pressureRadius = 80 + cult.realmIndex * 40;
+        spiritPhys.spiritSenseRange = 200 + cult.realmIndex * 100;
+        spiritPhys.resonanceElement = cult.spiritRoot;
+
+        e.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npcState).add(social).add(heritage).add(crafting).add(new KarmaChainComp()).add(spiritPhys);
 
         addEntity(e);
 
