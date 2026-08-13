@@ -185,9 +185,18 @@ class GameScene extends Scene {
     var weatherParticles:Array<{x:Float, y:Float, vx:Float, vy:Float, type:String, life:Float}> = [];
     var weatherFlash:Float = 0;           // 雷暴闪光计时
 
-    // --- 昼夜光照层 ---
+    // --- 昼夜 ---
     var dayNightOverlay:h2d.Bitmap;       // 昼夜暗化覆盖层
     var dayNightAlpha:Float = 0;          // 当前暗化透明度(0=白天, 0.6=夜晚)
+
+    // --- 六大世界规则系统可视化 ---
+    var terrainLayer:h2d.Graphics;        // 地形网格颜色层(挂在 bgLayer 上)
+    var terrainInitialized:Bool = false;  // 地形是否已初始化渲染
+    var divineFxLayer:h2d.Graphics;       // 天道特效层(金光/天罚/天道之眼)
+    var karmaFxLayer:h2d.Graphics;        // 因果链特效层(追杀红线/悬赏标记)
+    var reincarnationFxLayer:h2d.Graphics;// 轮回特效层(残魂/转世光柱)
+    var divineFlash:Float = 0;            // 天道干预闪光计时
+    var tribulationFlash:Float = 0;       // 天罚闪光计时
 
     // --- 物理状态信息(供 UI 显示) ---
     var playerPhysStatus:String = "";     // 玩家物理状态摘要
@@ -239,6 +248,14 @@ class GameScene extends Scene {
         formationLayer = new Object(worldCamera);
         entityLayer = new Object(worldCamera);
         fxLayer = new Object(worldCamera);
+
+        // 地形网格颜色层(在背景之上, 阵法之下)
+        terrainLayer = new h2d.Graphics(bgLayer);
+
+        // 天道/因果/轮回 特效层(在实体之上)
+        divineFxLayer = new h2d.Graphics(worldCamera);
+        karmaFxLayer = new h2d.Graphics(worldCamera);
+        reincarnationFxLayer = new h2d.Graphics(worldCamera);
 
         // 法术瞄准指示器(默认隐藏)
         targetingIndicator = new h2d.Graphics(worldCamera);
@@ -1928,6 +1945,10 @@ class GameScene extends Scene {
         updateWeatherVisual(dt);
         updateDayNightVisual(dt);
         updateVeinAirflowVisual(dt);
+        updateTerrainVisual(dt);
+        updateReincarnationVisual(dt);
+        updateDivineVisual(dt);
+        updateKarmaChainVisual(dt);
 
         super.sync(ctx);
     }
@@ -2477,6 +2498,349 @@ class GameScene extends Scene {
                 p.color = 0x88ffaa;
                 p.alpha = 0.4;
                 p.gravity = 0;
+            }
+        }
+    }
+
+    // ============================================================
+    //  地形系统可视化 — 在背景层渲染地形类型颜色
+    // ============================================================
+    function updateTerrainVisual(dt:Float):Void {
+        if (terrainLayer == null) return;
+
+        // 获取地形系统
+        var terrainSys:TerrainSystem = null;
+        for (s in engine.systems) {
+            var ts = Std.downcast(s, TerrainSystem);
+            if (ts != null) { terrainSys = ts; break; }
+        }
+        if (terrainSys == null) return;
+
+        // 懒初始化: 只渲染一次(地形不频繁变化)
+        if (terrainInitialized) {
+            // 每日刷新一次(地形微调)
+            if (engine.tickCount % engine.ticksPerDay != 0) return;
+        }
+        terrainInitialized = true;
+
+        terrainLayer.clear();
+
+        // 只渲染镜头可见区域的地形
+        var camLeft = camX;
+        var camTop = camY;
+        var camRight = camX + viewW;
+        var camBottom = camY + viewH;
+
+        var startCol = Std.int(Math.max(0, camLeft / terrainSys.gridSize));
+        var endCol = Std.int(Math.min(terrainSys.gridCols - 1, camRight / terrainSys.gridSize));
+        var startRow = Std.int(Math.max(0, camTop / terrainSys.gridSize));
+        var endRow = Std.int(Math.min(terrainSys.gridRows - 1, camBottom / terrainSys.gridSize));
+
+        for (gy in startRow...endRow + 1) {
+            for (gx in startCol...endCol + 1) {
+                if (gy < 0 || gy >= terrainSys.gridRows || gx < 0 || gx >= terrainSys.gridCols) continue;
+                var cell = terrainSys.grid[gy][gx];
+                var px = gx * terrainSys.gridSize;
+                var py = gy * terrainSys.gridSize;
+                var sz = terrainSys.gridSize;
+
+                // 地形颜色 + 透明度
+                var col = switch (cell.type) {
+                    case "mountain": 0x4a3a2a;
+                    case "water": 0x1a3a5a;
+                    case "forest": 0x1a3a1a;
+                    case "desert": 0x5a4a2a;
+                    default: 0x2a2a2a;
+                };
+                terrainLayer.beginFill(col, 0.25);
+                terrainLayer.drawRect(px, py, sz, sz);
+                terrainLayer.endFill();
+
+                // 山脉: 画三角形
+                if (cell.type == "mountain") {
+                    terrainLayer.lineStyle(1, 0x6a5a3a, 0.3);
+                    var cx = px + sz * 0.5;
+                    var cy = py + sz * 0.5;
+                    terrainLayer.moveTo(cx, cy - sz * 0.3);
+                    terrainLayer.lineTo(cx - sz * 0.25, cy + sz * 0.2);
+                    terrainLayer.lineTo(cx + sz * 0.25, cy + sz * 0.2);
+                    terrainLayer.lineTo(cx, cy - sz * 0.3);
+                }
+
+                // 水域: 波纹线
+                if (cell.type == "water") {
+                    terrainLayer.lineStyle(1, 0x3a6a9a, 0.2);
+                    var cy = py + sz * 0.5;
+                    terrainLayer.moveTo(px + 10, cy);
+                    terrainLayer.lineTo(px + 30, cy - 4);
+                    terrainLayer.lineTo(px + 50, cy);
+                    terrainLayer.lineTo(px + 70, cy - 4);
+                }
+
+                // 森林: 小圆点表示树木
+                if (cell.type == "forest") {
+                    terrainLayer.beginFill(0x2a5a2a, 0.3);
+                    for (i in 0...3) {
+                        var tx = px + 50 + i * 100;
+                        var ty = py + 50 + (i % 2) * 80;
+                        terrainLayer.drawCircle(tx, ty, 8);
+                    }
+                    terrainLayer.endFill();
+                }
+
+                // 沙漠: 横线表示沙丘
+                if (cell.type == "desert") {
+                    terrainLayer.lineStyle(1, 0x8a7a4a, 0.2);
+                    terrainLayer.moveTo(px + 20, py + sz * 0.4);
+                    terrainLayer.lineTo(px + sz - 20, py + sz * 0.4);
+                    terrainLayer.moveTo(px + 30, py + sz * 0.7);
+                    terrainLayer.lineTo(px + sz - 30, py + sz * 0.7);
+                }
+            }
+        }
+    }
+
+    // ============================================================
+    //  轮回系统可视化 — 残魂粒子 + 转世光柱
+    // ============================================================
+    function updateReincarnationVisual(dt:Float):Void {
+        if (reincarnationFxLayer == null) return;
+        reincarnationFxLayer.clear();
+
+        // 扫描事件日志中的轮回相关事件(最近20条)
+        var recentEvents = engine.eventLog.slice(-20);
+        var soulPendingEvents:Array<WorldEvent> = [];
+        var reincarnationEvents:Array<WorldEvent> = [];
+
+        for (evt in recentEvents) {
+            if (evt.type == "SoulPending") soulPendingEvents.push(evt);
+            if (evt.type == "Reincarnation") reincarnationEvents.push(evt);
+        }
+
+        // 转世光柱: 新转世的实体位置画金色光柱(渐隐)
+        for (evt in reincarnationEvents) {
+            var e = engine.getEntity(evt.sourceId);
+            if (e == null || !e.alive) continue;
+            var pos = e.get(PositionComp);
+            if (pos == null) continue;
+
+            // 只在镜头范围内渲染
+            if (pos.x < camX - 100 || pos.x > camX + viewW + 100) continue;
+            if (pos.y < camY - 100 || pos.y > camY + viewH + 100) continue;
+
+            // 金色光柱
+            reincarnationFxLayer.lineStyle(2, 0xffdd44, 0.5);
+            reincarnationFxLayer.moveTo(pos.x, pos.y - 80);
+            reincarnationFxLayer.lineTo(pos.x, pos.y + 10);
+
+            // 光环
+            reincarnationFxLayer.beginFill(0xffdd44, 0.08);
+            reincarnationFxLayer.drawCircle(pos.x, pos.y, 40);
+            reincarnationFxLayer.endFill();
+
+            // "转世" 文字标记
+            reincarnationFxLayer.beginFill(0xffdd44, 0.15);
+            reincarnationFxLayer.drawCircle(pos.x, pos.y - 50, 6);
+            reincarnationFxLayer.endFill();
+        }
+
+        // 残魂: 为有前世记忆的实体画灵魂标记
+        for (e in engine.entities) {
+            if (!e.alive) continue;
+            var reinc = e.get(ReincarnationComp);
+            if (reinc == null || !reinc.hasPastLife) continue;
+            var pos = e.get(PositionComp);
+            if (pos == null) continue;
+
+            // 只在镜头范围内渲染
+            if (pos.x < camX - 50 || pos.x > camX + viewW + 50) continue;
+            if (pos.y < camY - 50 || pos.y > camY + viewH + 50) continue;
+
+            // 前世记忆标记: 头顶淡紫色灵魂图标
+            var alpha = 0.3 + Math.sin(elapsed * 3 + e.id) * 0.1;
+            reincarnationFxLayer.beginFill(0xaa88ff, alpha);
+            reincarnationFxLayer.drawCircle(pos.x, pos.y - 35, 4);
+            reincarnationFxLayer.endFill();
+
+            // 多世轮回: 转世次数越多光环越大
+            if (reinc.reincarnationCount > 1) {
+                reincarnationFxLayer.lineStyle(1, 0xaa88ff, 0.15);
+                reincarnationFxLayer.drawCircle(pos.x, pos.y, 20 + reinc.reincarnationCount * 3);
+            }
+        }
+    }
+
+    // ============================================================
+    //  天道意志可视化 — 天道干预金光 + 天罚雷击 + 天道之眼 + 命运光环
+    // ============================================================
+    function updateDivineVisual(dt:Float):Void {
+        if (divineFxLayer == null) return;
+        divineFxLayer.clear();
+
+        // 闪光衰减
+        if (divineFlash > 0) divineFlash -= dt * 2;
+        if (tribulationFlash > 0) tribulationFlash -= dt * 3;
+
+        // 扫描天道事件
+        var recentEvents = engine.eventLog.slice(-15);
+        for (evt in recentEvents) {
+            switch (evt.type) {
+                case "HeavenlyIntervention", "SpiritRain", "SpiritBeastGuardian":
+                    // 天道干预: 全屏金光闪烁
+                    divineFlash = 1.0;
+                case "HeavenlyTribulation":
+                    // 天罚: 雷击效果
+                    tribulationFlash = 1.0;
+                    var target = engine.getEntity(evt.sourceId);
+                    if (target != null && target.alive) {
+                        var pos = target.get(PositionComp);
+                        if (pos != null) {
+                            // 画天罚雷柱
+                            divineFxLayer.lineStyle(3, 0xffff44, 0.6);
+                            divineFxLayer.moveTo(pos.x + (Math.random() * 20 - 10), pos.y - 120);
+                            divineFxLayer.lineTo(pos.x, pos.y);
+                            divineFxLayer.lineStyle(1, 0xffffff, 0.8);
+                            divineFxLayer.moveTo(pos.x, pos.y - 100);
+                            divineFxLayer.lineTo(pos.x, pos.y);
+                            // 冲击波
+                            divineFxLayer.beginFill(0xffff44, 0.1);
+                            divineFxLayer.drawCircle(pos.x, pos.y, 30);
+                            divineFxLayer.endFill();
+                        }
+                    }
+                case "HeavenlyEye":
+                    // 天道之眼: 锁定目标画眼睛图标
+                    var target = engine.getEntity(evt.sourceId);
+                    if (target != null && target.alive) {
+                        var pos = target.get(PositionComp);
+                        if (pos != null) {
+                            var eyePulse = 0.3 + Math.sin(elapsed * 5) * 0.2;
+                            // 眼睛轮廓
+                            divineFxLayer.lineStyle(2, 0xff4444, eyePulse);
+                            divineFxLayer.moveTo(pos.x - 15, pos.y - 45);
+                            divineFxLayer.lineTo(pos.x, pos.y - 50);
+                            divineFxLayer.lineTo(pos.x + 15, pos.y - 45);
+                            divineFxLayer.lineTo(pos.x, pos.y - 40);
+                            divineFxLayer.lineTo(pos.x - 15, pos.y - 45);
+                            // 瞳孔
+                            divineFxLayer.beginFill(0xff0000, eyePulse);
+                            divineFxLayer.drawCircle(pos.x, pos.y - 45, 3);
+                            divineFxLayer.endFill();
+                        }
+                    }
+                case "DestinyChosen":
+                    // 天命之人: 金色光环
+                    var target = engine.getEntity(evt.sourceId);
+                    if (target != null && target.alive) {
+                        var pos = target.get(PositionComp);
+                        if (pos != null) {
+                            var pulse = 0.2 + Math.sin(elapsed * 2) * 0.1;
+                            divineFxLayer.lineStyle(2, 0xffdd00, pulse);
+                            divineFxLayer.drawCircle(pos.x, pos.y, 25);
+                            divineFxLayer.lineStyle(1, 0xffdd00, pulse * 0.5);
+                            divineFxLayer.drawCircle(pos.x, pos.y, 35);
+                        }
+                    }
+                case "DestinyForsaken":
+                    // 天弃之子: 灰暗光环
+                    var target = engine.getEntity(evt.sourceId);
+                    if (target != null && target.alive) {
+                        var pos = target.get(PositionComp);
+                        if (pos != null) {
+                            divineFxLayer.lineStyle(1, 0x666666, 0.3);
+                            divineFxLayer.drawCircle(pos.x, pos.y, 20);
+                        }
+                    }
+            }
+        }
+
+        // 天道干预全屏金光
+        if (divineFlash > 0) {
+            divineFxLayer.beginFill(0xffdd44, divineFlash * 0.06);
+            divineFxLayer.drawRect(camX, camY, viewW, viewH);
+            divineFxLayer.endFill();
+        }
+
+        // 天罚闪光
+        if (tribulationFlash > 0) {
+            divineFxLayer.beginFill(0xffffff, tribulationFlash * 0.08);
+            divineFxLayer.drawRect(camX, camY, viewW, viewH);
+            divineFxLayer.endFill();
+        }
+    }
+
+    // ============================================================
+    //  因果链可视化 — 追杀红线 + 悬赏标记
+    // ============================================================
+    function updateKarmaChainVisual(dt:Float):Void {
+        if (karmaFxLayer == null) return;
+        karmaFxLayer.clear();
+
+        // 获取因果链系统
+        var karmaChainSys:KarmaChainSystem = null;
+        for (s in engine.systems) {
+            var kcs = Std.downcast(s, KarmaChainSystem);
+            if (kcs != null) { karmaChainSys = kcs; break; }
+        }
+
+        // 遍历所有正在追杀的实体, 画追杀红线
+        for (e in engine.entities) {
+            if (!e.alive) continue;
+            var chainComp = e.get(KarmaChainComp);
+            if (chainComp == null || !chainComp.isPursuing) continue;
+
+            var myPos = e.get(PositionComp);
+            if (myPos == null) continue;
+
+            var target = engine.getEntity(chainComp.pursuitTargetId);
+            if (target == null || !target.alive) continue;
+            var targetPos = target.get(PositionComp);
+            if (targetPos == null) continue;
+
+            // 只在镜头范围内渲染
+            var midX = (myPos.x + targetPos.x) * 0.5;
+            var midY = (myPos.y + targetPos.y) * 0.5;
+            if (midX < camX - 200 || midX > camX + viewW + 200) continue;
+            if (midY < camY - 200 || midY > camY + viewH + 200) continue;
+
+            // 追杀红线(虚线效果用多段)
+            var dx = targetPos.x - myPos.x;
+            var dy = targetPos.y - myPos.y;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 1) continue;
+
+            var segments = Std.int(dist / 15);
+            var pulse = 0.3 + Math.sin(elapsed * 8 + e.id) * 0.2;
+
+            for (i in 0...segments) {
+                if (i % 2 == 0) continue; // 虚线
+                var t1 = i / segments;
+                var t2 = (i + 1) / segments;
+                karmaFxLayer.lineStyle(1, 0xff3333, pulse);
+                karmaFxLayer.moveTo(myPos.x + dx * t1, myPos.y + dy * t1);
+                karmaFxLayer.lineTo(myPos.x + dx * t2, myPos.y + dy * t2);
+            }
+
+            // 目标头顶悬赏标记(红色感叹号)
+            karmaFxLayer.beginFill(0xff3333, pulse);
+            karmaFxLayer.drawRect(targetPos.x - 2, targetPos.y - 45, 4, 10);
+            karmaFxLayer.drawCircle(targetPos.x, targetPos.y - 30, 3);
+            karmaFxLayer.endFill();
+        }
+
+        // 因果链总计数(如果玩家有因果链)
+        var playerChain = playerEntity.get(KarmaChainComp);
+        if (playerChain != null && playerChain.killCount > 0) {
+            // 玩家头顶画因果标记(紫色因果丝线)
+            var pos = playerEntity.get(PositionComp);
+            if (pos != null) {
+                for (i in 0...Std.int(Math.min(playerChain.killCount, 5))) {
+                    var angle = elapsed * 2 + i * 1.2;
+                    var r = 30;
+                    karmaFxLayer.lineStyle(1, 0xaa44ff, 0.2);
+                    karmaFxLayer.moveTo(pos.x, pos.y - 20);
+                    karmaFxLayer.lineTo(pos.x + Math.cos(angle) * r, pos.y - 20 + Math.sin(angle) * r);
+                }
             }
         }
     }
