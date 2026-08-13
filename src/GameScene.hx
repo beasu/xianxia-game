@@ -284,8 +284,8 @@ class GameScene extends Scene {
         // 世界尺寸 = 屏幕的 3 倍, 玩家可以在广阔世界中探索
         viewW = width;
         viewH = height;
-        var worldW = width * 3;
-        var worldH = height * 3;
+        var worldW = width * 6;
+        var worldH = height * 6;
         engine = new WorldEngine(worldW, worldH);
         inst2 = engine;
 
@@ -2064,14 +2064,27 @@ class GameScene extends Scene {
 
         var speed = 350; // pixels per second
 
-        // 玩家移动: 直接更新位置(实时响应, 不等 tick)
-        pos.vx = 0;
-        pos.vy = 0;
-        var manualInput = false;
-        if (Key.isDown(Key.W) || Key.isDown(Key.UP)) { pos.vy -= speed; manualInput = true; }
-        if (Key.isDown(Key.S) || Key.isDown(Key.DOWN)) { pos.vy += speed; manualInput = true; }
-        if (Key.isDown(Key.A) || Key.isDown(Key.LEFT)) { pos.vx -= speed; manualInput = true; }
-        if (Key.isDown(Key.D) || Key.isDown(Key.RIGHT)) { pos.vx += speed; manualInput = true; }
+        // 玩家移动: 使用方向向量+归一化, 保证任意方向速度一致
+        var moveDirX:Float = 0;
+        var moveDirY:Float = 0;
+
+        if (Key.isDown(Key.W) || Key.isDown(Key.UP)) moveDirY -= 1;
+        if (Key.isDown(Key.S) || Key.isDown(Key.DOWN)) moveDirY += 1;
+        if (Key.isDown(Key.A) || Key.isDown(Key.LEFT)) moveDirX -= 1;
+        if (Key.isDown(Key.D) || Key.isDown(Key.RIGHT)) moveDirX += 1;
+
+        var manualInput = (moveDirX != 0 || moveDirY != 0);
+
+        if (manualInput) {
+            // 归一化方向向量, 消除斜向移动速度加成(原来快40%)
+            var len = Math.sqrt(moveDirX * moveDirX + moveDirY * moveDirY);
+            moveDirX /= len;
+            moveDirY /= len;
+
+            // 设置移动速度(每帧统一在末尾更新位置)
+            pos.vx = moveDirX * speed;
+            pos.vy = moveDirY * speed;
+        }
 
         // 手动操作取消自动寻路
         if (manualInput) isAutoMoving = false;
@@ -2083,12 +2096,21 @@ class GameScene extends Scene {
             var dist = Math.sqrt(dx * dx + dy * dy);
             if (dist < 10) {
                 isAutoMoving = false;
+                pos.vx = 0;
+                pos.vy = 0;
             } else {
                 pos.vx = (dx / dist) * speed;
                 pos.vy = (dy / dist) * speed;
             }
         }
 
+        // 无按键且非自动寻路时速度归零(修仙者随心而动, 无惯性滑行)
+        if (!manualInput && !isAutoMoving) {
+            pos.vx = 0;
+            pos.vy = 0;
+        }
+
+        // 统一位置更新(每帧只更新一次, 避免卡顿)
         pos.x += pos.vx * dt;
         pos.y += pos.vy * dt;
         // 玩家限制在世界边界内

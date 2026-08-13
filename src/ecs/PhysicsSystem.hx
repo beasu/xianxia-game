@@ -421,6 +421,8 @@ class PhysicsSystem implements ISystem {
     function updateEntityPhysics(world:WorldEngine, dt:Float):Void {
         for (e in world.entities) {
             if (!e.alive) continue;
+            // 玩家位置由 handleInput 每帧直接更新, 跳过物理积分避免双重推进
+            if (e.isPlayer) continue;
             var pos = e.get(PositionComp);
             if (pos == null) continue;
             var sp = e.get(SpiritPhysicsComp);
