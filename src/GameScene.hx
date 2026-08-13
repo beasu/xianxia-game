@@ -2458,6 +2458,10 @@ class GameScene extends Scene {
         dayNightAlpha += (targetAlpha - dayNightAlpha) * dt * 2;
         dayNightOverlay.alpha = dayNightAlpha;
 
+        // Multiply blend 不依赖 alpha: 即使 alpha=0 仍会让画面变暗。
+        // 白天时彻底隐藏 overlay, 只在需要暗化时才显示
+        dayNightOverlay.visible = dayNightAlpha > 0.02;
+
         // 根据阶段调整颜色
         var color = switch (dayNightSys.state.dayPhase) {
             case "dawn":  0x442233;   // 黎明: 微红
