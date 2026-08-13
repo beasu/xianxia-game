@@ -71,7 +71,7 @@ class DayNightSystem implements ISystem {
                 state.yaoshouActivityMul = 1.0;
                 state.cultivatorActivityMul = 1.0;
                 state.spiritMul = 1.05;
-                state.darkness = 0.15;
+                state.darkness = 0.06;
             case "day":
                 state.yaoshouActivityMul = 0.5;
                 state.cultivatorActivityMul = dayCultivatorBonus;
@@ -81,12 +81,12 @@ class DayNightSystem implements ISystem {
                 state.yaoshouActivityMul = 1.3;
                 state.cultivatorActivityMul = 0.8;
                 state.spiritMul = 1.1;
-                state.darkness = 0.15;
+                state.darkness = 0.06;
             case "night":
                 state.yaoshouActivityMul = 1.8;
                 state.cultivatorActivityMul = 0.6;
                 state.spiritMul = 1.15;
-                state.darkness = 0.25;
+                state.darkness = 0.12;
         }
 
         // 昼夜切换事件

@@ -267,13 +267,14 @@ class GameScene extends Scene {
         // 天气覆盖层(固定在屏幕上, 不随镜头移动)
         weatherOverlay = new h2d.Graphics(uiLayer);
 
-        // 昼夜光照覆盖层(全屏暗化)
+        // 昼夜光照覆盖层(全屏暗化) — 使用 Alpha blend 而非 Multiply,
+        // Multiply 会直接把整个画面乘以深色, 即使 alpha 很低也会让画面全黑
         var dnTile = h2d.Tile.fromColor(0x000033, 1, 1);
         dayNightOverlay = new h2d.Bitmap(dnTile, uiLayer);
         dayNightOverlay.scaleX = 3000;
         dayNightOverlay.scaleY = 3000;
         dayNightOverlay.alpha = 0;
-        dayNightOverlay.blendMode = Multiply;
+        dayNightOverlay.blendMode = Alpha;
     }
 
     // ============================================================
@@ -2460,20 +2461,16 @@ class GameScene extends Scene {
         dayNightAlpha += (targetAlpha - dayNightAlpha) * dt * 2;
         dayNightOverlay.alpha = dayNightAlpha;
 
-        // Multiply blend 不依赖 alpha: 即使 alpha=0 仍会让画面变暗。
-        // 白天时彻底隐藏 overlay, 只在需要暗化时才显示
-        dayNightOverlay.visible = dayNightAlpha > 0.02;
-
         // 根据阶段调整颜色
         var color = switch (dayNightSys.state.dayPhase) {
-            case "dawn":  0x442233;   // 黎明: 微红
+            case "dawn":  0x994433;   // 黎明: 微红
             case "day":   0x000033;   // 白天: 几乎无
-            case "dusk":  0x332244;   // 黄昏: 微紫
-            case "night": 0x000022;   // 夜晚: 深蓝
+            case "dusk":  0x443366;   // 黄昏: 微紫
+            case "night": 0x001144;   // 夜晚: 深蓝(亮度增加)
             default:      0x000033;
         };
         // 重新创建颜色 tile
-        if (dayNightAlpha > 0.01) {
+        if (dayNightAlpha > 0.005) {
             dayNightOverlay.tile = h2d.Tile.fromColor(color, 1, 1);
         }
     }
