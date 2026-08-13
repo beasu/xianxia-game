@@ -200,7 +200,7 @@ class IntentResolutionSystem implements ISystem {
                 var dy = intent.targetY - pos.y;
                 var dist = Math.sqrt(dx * dx + dy * dy);
                 if (dist > 5) {
-                    var speed = 60;
+                    var speed = 20;
                     pos.vx += (dx / dist) * speed * dt * 10;
                     pos.vy += (dy / dist) * speed * dt * 10;
                 } else {
@@ -218,7 +218,7 @@ class IntentResolutionSystem implements ISystem {
                     var dy = nearestVein.y - pos.y;
                     var dist = Math.sqrt(dx * dx + dy * dy);
                     if (dist > 20) {
-                        var speed = 80;
+                        var speed = 30;
                         pos.vx += (dx / dist) * speed * dt * 10;
                         pos.vy += (dy / dist) * speed * dt * 10;
                     } else {
@@ -251,7 +251,7 @@ class IntentResolutionSystem implements ISystem {
 
                 if (dist > 40) {
                     // 移动靠近目标
-                    var speed = 80;
+                    var speed = 35;
                     pos.vx += (dx / dist) * speed * dt * 10;
                     pos.vy += (dy / dist) * speed * dt * 10;
                 } else {
@@ -369,6 +369,50 @@ class IntentResolutionSystem implements ISystem {
 
             case Assassinate:
                 // 暗杀由 NPCSocialSystem 处理
+
+            case Hunt:
+                // 追杀意图: 向追杀目标移动并发起攻击
+                var target = world.getEntity(intent.targetEntityId);
+                if (target == null || !target.alive) {
+                    intent.currentIntent = Idle;
+                    return;
+                }
+                var targetPos = target.get(PositionComp);
+                if (targetPos == null) {
+                    intent.currentIntent = Idle;
+                    return;
+                }
+                var dx = targetPos.x - pos.x;
+                var dy = targetPos.y - pos.y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > 40) {
+                    // 追击(速度比普通攻击快)
+                    var speed = 50;
+                    pos.vx += (dx / dist) * speed * dt * 10;
+                    pos.vy += (dy / dist) * speed * dt * 10;
+                } else {
+                    // 发起攻击(复用 AttackEntity 的攻击逻辑)
+                    var targetCult = target.get(CultivationComp);
+                    if (targetCult != null) {
+                        npc.aiTimer -= dt;
+                        if (npc.aiTimer <= 0) {
+                            npc.aiTimer = 0.8; // 追杀者攻击频率更高
+                            var dmg = Std.int(cult.attackPower * 1.2 + Math.random(10));
+                            targetCult.hp -= dmg;
+                            world.emitEvent(new WorldEvent(e.id, target.id, "HuntAttack",
+                                e.name + " 追杀 " + target.name + ", 造成" + dmg + "伤害"
+                            ));
+                            if (targetCult.hp <= 0) {
+                                target.alive = false;
+                                cult.exp += 30 + targetCult.realmIndex * 20;
+                                world.emitEvent(new WorldEvent(e.id, target.id, "Kill",
+                                    e.name + " 追杀得手, " + target.name + "殒命!"
+                                ));
+                                intent.currentIntent = Idle;
+                            }
+                        }
+                    }
+                }
 
             case Dead:
                 // do nothing

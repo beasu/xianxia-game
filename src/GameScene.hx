@@ -34,6 +34,13 @@ import ecs.NPCSocialSystem;
 import ecs.LifecycleAndHeritageSystem;
 import ecs.CraftingEconomySystem;
 import ecs.WorldCataclysmSystem;
+import ecs.WeatherSystem;
+import ecs.TerrainSystem;
+import ecs.DayNightSystem;
+import ecs.ReincarnationSystem;
+import ecs.HeavenlyDaoSystem;
+import ecs.KarmaChainSystem;
+import ecs.PhysicsSystem;
 
 /**
     GameScene - 修仙世界观察者
@@ -160,6 +167,9 @@ class GameScene extends Scene {
     // --- 技能冷却 ---
     public var cooldowns:Map<String, Float> = [];
 
+    // --- 玩家采集灵草 ---
+    var playerGatherCd:Float = 0;
+
     // --- 法术目标选择系统 ---
     // 按下技能键后进入瞄准模式, 左键选择释放位置, Tab 自动锁定最近敌人
     var pendingSpell:String = null;       // 待释放的法术ID (null=未在瞄准)
@@ -238,14 +248,21 @@ class GameScene extends Scene {
         inst2 = engine;
 
         // 注册系统
-        engine.addSystem(new IntentResolutionSystem());
-        engine.addSystem(new NPCSocialSystem());
+        engine.addSystem(new PhysicsSystem());           // priority 5
+        engine.addSystem(new IntentResolutionSystem());   // priority 10
+        engine.addSystem(new DayNightSystem());           // priority 11
+        engine.addSystem(new WeatherSystem());            // priority 12
+        engine.addSystem(new TerrainSystem());            // priority 14
+        engine.addSystem(new NPCSocialSystem());          // priority 18
         engine.addSystem(new LifecycleAndHeritageSystem());
         engine.addSystem(new WorldEcologySystem());
         engine.addSystem(new EcologySystem());
         engine.addSystem(new CraftingEconomySystem());
         engine.addSystem(new KarmaAndTribulationSystem());
+        engine.addSystem(new KarmaChainSystem());         // priority 28
         engine.addSystem(new WorldCataclysmSystem());
+        engine.addSystem(new ReincarnationSystem());      // priority 35
+        engine.addSystem(new HeavenlyDaoSystem());        // priority 40
         engine.addSystem(new HistorySystem());
 
         // 初始化灵脉
@@ -311,7 +328,7 @@ class GameScene extends Scene {
         crafting.alchemySkill = 30; // 玩家初始有一定炼丹基础
         crafting.smithingSkill = 20;
 
-        playerEntity.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npc).add(social).add(heritage).add(crafting);
+        playerEntity.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npc).add(social).add(heritage).add(crafting).add(new KarmaChainComp());
         engine.addEntity(playerEntity);
 
         // 创建玩家渲染对象
@@ -1488,18 +1505,25 @@ class GameScene extends Scene {
             g.visible = true;
             g.x = node.x;
             g.y = node.y;
-            // 灵草簇: 绿色圆点 + 光晕
+            // 灵草簇: 鲜艳绿色 + 脉动光晕
             var ratio = node.herbs / node.maxHerbs;
-            var size = 4 + ratio * 6;
-            g.beginFill(0x22aa44, 0.25);
-            drawCircleOn(g, 0, 0, size + 6);
+            var size = 6 + ratio * 8;
+            var pulse = 1.0 + Math.sin(elapsed * 3 + i * 0.5) * 0.15;
+            // 外层光晕(大范围柔光)
+            g.beginFill(0x00ff44, 0.15);
+            drawCircleOn(g, 0, 0, (size + 12) * pulse);
             g.endFill();
-            g.beginFill(0x44ff66, 0.7);
+            // 中层光晕
+            g.beginFill(0x22cc44, 0.3);
+            drawCircleOn(g, 0, 0, (size + 5) * pulse);
+            g.endFill();
+            // 主体(鲜艳翠绿)
+            g.beginFill(0x44ff66, 0.85);
             drawCircleOn(g, 0, 0, size);
             g.endFill();
-            // 中心高亮
-            g.beginFill(0xaaeeaa, 0.9);
-            drawCircleOn(g, 0, 0, size * 0.4);
+            // 中心高亮(发光感)
+            g.beginFill(0xccffcc, 1.0);
+            drawCircleOn(g, 0, 0, size * 0.35);
             g.endFill();
         }
 
@@ -1750,6 +1774,45 @@ class GameScene extends Scene {
 
         // === 同步渲染: 遍历世界实体, 更新对应的渲染对象 ===
         syncRender();
+
+        // === 玩家采集灵草 ===
+        if (!paused && playerGatherCd > 0) playerGatherCd -= dt;
+        if (!paused && playerGatherCd <= 0) {
+            var pPos = playerEntity.get(PositionComp);
+            var pInv = playerEntity.get(InventoryComp);
+            if (pPos != null && pInv != null) {
+                for (node in engine.spiritHerbNodes) {
+                    if (!node.alive || node.herbs < 1) continue;
+                    var dx = node.x - pPos.x;
+                    var dy = node.y - pPos.y;
+                    if (dx * dx + dy * dy < 50 * 50) {
+                        var gatherAmt = 1;
+                        node.herbs -= gatherAmt;
+                        pInv.herbs += gatherAmt;
+                        if (Math.random() < 0.3) pInv.materials += 1;
+                        playerGatherCd = 1.5; // 1.5秒采集冷却
+                        flashInfo("采集灵草 +1 (合计: " + pInv.herbs + ")");
+                        // 采集粒子效果
+                        for (i in 0...6) {
+                            var p = getParticle();
+                            p.x = node.x + randRange(-10, 10);
+                            p.y = node.y + randRange(-10, 10);
+                            p.vx = randRange(-30, 30);
+                            p.vy = randRange(-40, -10);
+                            p.life = randRange(0.3, 0.6);
+                            p.maxLife = p.life;
+                            p.size = randRange(2, 4);
+                            p.color = 0x44ff66;
+                            p.type = Spark;
+                            p.glow = true;
+                            p.fade = true;
+                            p.drag = 0.92;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
 
         // === 渲染世界元素: 灵草资源点、秘境 ===
         renderWorldElements();

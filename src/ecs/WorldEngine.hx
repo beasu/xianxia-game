@@ -116,6 +116,14 @@ class WorldEngine {
         return null;
     }
 
+    // 获取实体(包括已死亡的, 用于轮回/因果系统)
+    public function getEntityIncludingDead(id:Int):Entity {
+        for (e in entities) {
+            if (e.id == id) return e;
+        }
+        return null;
+    }
+
     // --- 订阅世界事件 ---
     public function subscribeToEvents(fn:WorldEvent -> Void):Void {
         eventSubscribers.push(fn);
@@ -457,7 +465,7 @@ class WorldEngine {
             crafting.smithingSkill = Math.random() < 0.2 ? randRange(0, 15) : 0;
         }
 
-        e.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npcState).add(social).add(heritage).add(crafting);
+        e.add(pos).add(cult).add(intent).add(karma).add(inv).add(fac).add(npcState).add(social).add(heritage).add(crafting).add(new KarmaChainComp());
 
         addEntity(e);
 

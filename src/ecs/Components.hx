@@ -109,6 +109,7 @@ enum abstract IntentType(Int) from Int to Int {
     var Socialize = 11;     // 社交(结盟/联姻/拜访)
     var Betray = 12;        // 背叛
     var Assassinate = 13;   // 暗杀
+    var Hunt = 14;          // 追杀(因果链系统)
 }
 
 // --- 因果/业力组件 ---
@@ -315,4 +316,98 @@ class EcologyGridCell {
         depleted = 0;
         surge = 0;
     }
+}
+
+// ============================================================
+//  === 天气/地形/昼夜/轮回/天道/因果链 新增组件 ===
+// ============================================================
+
+// --- 天气状态 (世界级, 挂在 WorldEngine 上而非实体) ---
+class WeatherState {
+    public var type:String = "clear";       // clear/rain/snow/thunder/fog
+    public var intensity:Float = 1.0;       // 天气强度 0-1
+    public var remainingTime:Float = 60;    // 剩余持续时间(秒)
+    public var transitionTimer:Float = 0;   // 过渡计时
+    public var nextType:String = "clear";   // 下一个天气类型(过渡用)
+
+    // 天气修正系数(由 WeatherSystem 更新)
+    public var spiritMul:Float = 1.0;       // 灵气浓度倍率
+    public var fireMul:Float = 1.0;         // 火系伤害倍率
+    public var iceMul:Float = 1.0;          // 冰系伤害倍率
+    public var thunderMul:Float = 1.0;      // 雷系伤害倍率
+    public var moveMul:Float = 1.0;         // 移动速度倍率
+    public var visibility:Float = 1.0;      // 可见度
+
+    public function new() {}
+}
+
+// --- 地形网格单元 (TerrainSystem 管理) ---
+class TerrainCell {
+    public var gridX:Int;
+    public var gridY:Int;
+    public var type:String;              // mountain/water/plain/forest/desert
+    public var moveSpeedMul:Float;       // 移动速度倍率
+    public var cultivateMul:Float;       // 修炼效率倍率
+    public var elementBonus:String;      // 增强的元素: fire/water/wood/metal/earth/none
+    public var elementMul:Float;         // 元素法术增幅
+    public var friction:Float;           // 摩擦系数(影响击退距离)
+
+    public function new(gx:Int, gy:Int) {
+        gridX = gx;
+        gridY = gy;
+        type = "plain";
+        moveSpeedMul = 1.0;
+        cultivateMul = 1.0;
+        elementBonus = "none";
+        elementMul = 1.0;
+        friction = 0.85;
+    }
+}
+
+// --- 昼夜状态 (世界级) ---
+class DayNightState {
+    public var timeOfDay:Float = 0.25;   // 当前时间(0=午夜, 0.25=日出, 0.5=正午, 0.75=日落)
+    public var isNight:Bool = false;
+    public var dayPhase:String = "dawn"; // dawn/day/dusk/night
+    public var yaoshouActivityMul:Float = 1.0; // 妖兽活跃度倍率
+    public var cultivatorActivityMul:Float = 1.0; // 正道修士活跃度倍率
+    public var spiritMul:Float = 1.0;    // 灵气浓度倍率(夜晚略高)
+    public var darkness:Float = 0;       // 黑暗度 0-1(用于渲染叠加)
+
+    public function new() {}
+}
+
+// --- 轮回/残魂组件 (挂在死亡前的实体上, 记录转世信息) ---
+class ReincarnationComp implements IComponent {
+    public var pastLifeId:Int = -1;          // 前世实体ID
+    public var pastLifeName:String = "";     // 前世名字
+    public var pastLifeRealm:Int = 0;        // 前世境界
+    public var retainedExp:Float = 0;        // 保留的经验值
+    public var retainedTalent:Float = 0;     // 保留的天赋加成
+    public var retainedSin:Float = 0;        // 保留的业障
+    public var retainedMemories:Array<{id:Int, rel:Float, note:String}> = []; // 保留的记忆
+    public var reincarnationCount:Int = 0;   // 转世次数
+    public var hasPastLife:Bool = false;     // 是否有前世记忆
+
+    public function new() {}
+}
+
+// --- 因果链记录 (挂在 KarmaComp 的补充, 或独立组件) ---
+class KarmaChainComp implements IComponent {
+    public var killTargets:Array<Int> = [];      // 我杀过的人的ID列表
+    public var hunters:Array<Int> = [];          // 正在追杀我的人的ID列表
+    public var huntTargets:Array<Int> = [];      // 我正在追杀的人的ID列表
+    public var bountyLevel:Float = 0;            // 悬赏等级(0-100, 越高吸引越强的赏金猎人)
+    public var karmicDebtors:Map<Int, Float> = []; // 欠谁的因果债: entityId -> 债务值
+    public var karmicCreditors:Map<Int, Float> = []; // 谁欠我的: entityId -> 债权值
+
+    // === KarmaChainSystem 新增字段 ===
+    public var killCount:Int = 0;                // 总击杀数(因果链深度)
+    public var totalKarmaWeight:Float = 0;       // 因果链总权重
+    public var isPursuing:Bool = false;          // 是否正在追杀某人
+    public var pursuitTargetId:Int = -1;         // 追杀目标ID
+    public var pursuitTargetName:String = "";    // 追杀目标名
+    public var pursuitTimer:Float = 0;           // 追杀剩余时间
+
+    public function new() {}
 }

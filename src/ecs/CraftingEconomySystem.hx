@@ -153,7 +153,7 @@ class CraftingEconomySystem implements ISystem {
             var dist = Math.sqrt(dx * dx + dy * dy);
             if (dist > herbGatherRange) {
                 if (dist > 1) {
-                    var speed = 70;
+                    var speed = 25;
                     pos.vx += (dx / dist) * speed * dt * 10;
                     pos.vy += (dy / dist) * speed * dt * 10;
                 }
