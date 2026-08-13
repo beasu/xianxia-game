@@ -155,6 +155,28 @@ class Cultivator extends Object {
     var hpBarFill:Bitmap;
     public var nameText:Text;
 
+    // === 物理状态视觉层 ===
+    public var statusLayer:Graphics;      // 状态效果层(冰冻/燃烧/眩晕)
+    public var shieldLayer:Graphics;      // 护体灵光层
+    public var pressureLayer:Graphics;    // 灵压可视化层
+    public var resonanceLayer:Graphics;   // 元素共振光环层
+    public var flightLayer:Graphics;      // 御剑飞行光环层
+
+    // 物理状态值(由 GameScene.syncRender 每帧同步)
+    public var physFrozen:Float = 0;
+    public var physBurn:Float = 0;
+    public var physStun:Float = 0;
+    public var physSlow:Float = 0;
+    public var physSlowFactor:Float = 1.0;
+    public var physShieldActive:Bool = false;
+    public var physShieldStrength:Float = 0;
+    public var physShieldMax:Float = 0;
+    public var physIsFlying:Bool = false;
+    public var physPressure:Float = 0;
+    public var physResonanceStrength:Float = 0;
+    public var physResonanceBonus:Float = 1.0;
+    public var physResonanceColor:Int = 0xffffff;
+
     var animTime:Float = 0;
     var facingRight:Bool = true;
 
@@ -180,6 +202,13 @@ class Cultivator extends Object {
         robe = new Graphics(this);   // 外袍层(在身体下方)
         hair = new Graphics(this);   // 头发层(在身体上方)
         body = new Graphics(this);
+
+        // 物理状态视觉层(在身体上方)
+        pressureLayer = new Graphics(this);
+        resonanceLayer = new Graphics(this);
+        shieldLayer = new Graphics(this);
+        flightLayer = new Graphics(this);
+        statusLayer = new Graphics(this);
 
         var bgTile = Tile.fromColor(0x000000, 80, 6);
         hpBarBg = new Bitmap(bgTile, this);
@@ -885,5 +914,185 @@ class Cultivator extends Object {
         if (robe != null) {
             robe.scaleX = 1.0 + Math.sin(animTime * 2) * 0.03;
         }
+
+        // 物理状态视觉更新
+        updatePhysicsVisual(dt);
     }
+
+    // === 物理状态视觉渲染 ===
+    function updatePhysicsVisual(dt:Float):Void {
+        // 清除所有状态层
+        if (statusLayer != null) statusLayer.clear();
+        if (shieldLayer != null) shieldLayer.clear();
+        if (pressureLayer != null) pressureLayer.clear();
+        if (resonanceLayer != null) resonanceLayer.clear();
+        if (flightLayer != null) flightLayer.clear();
+
+        // --- 冰冻效果: 蓝色冰晶覆盖 ---
+        if (physFrozen > 0) {
+            var iceAlpha = Math.min(0.6, physFrozen * 0.3);
+            // 冰晶外壳
+            statusLayer.beginFill(0x88ccff, iceAlpha);
+            statusLayer.drawCircle(0, -10, 28);
+            statusLayer.endFill();
+            // 冰晶尖刺(6个方向)
+            for (i in 0...6) {
+                var angle = (i / 6) * Math.PI * 2 + animTime * 0.5;
+                var cx = Math.cos(angle) * 25;
+                var cy = Math.sin(angle) * 25 - 10;
+                var spikeLen = 8 + Math.sin(animTime * 4 + i) * 3;
+                statusLayer.lineStyle(2, 0xaaeeff, iceAlpha + 0.2);
+                statusLayer.moveTo(cx, cy);
+                statusLayer.lineTo(cx + Math.cos(angle) * spikeLen, cy + Math.sin(angle) * spikeLen);
+            }
+            // 冰冻时整体偏蓝
+            statusLayer.beginFill(0x4488ff, 0.15);
+            statusLayer.drawCircle(0, -10, 30);
+            statusLayer.endFill();
+        }
+
+        // --- 燃烧效果: 火焰粒子 ---
+        if (physBurn > 0) {
+            var fireAlpha = Math.min(0.7, physBurn * 0.35);
+            // 火焰光晕
+            for (i in 0...5) {
+                var phase = animTime * 3 + i * 1.2;
+                var fx = Math.sin(phase) * 15;
+                var fy = -15 + Math.cos(phase * 0.7) * 10 - i * 3;
+                var fr = 6 + Math.sin(phase * 2) * 3;
+                statusLayer.beginFill(0xff4400, fireAlpha * (1 - i * 0.15));
+                statusLayer.drawCircle(fx, fy, fr);
+                statusLayer.endFill();
+                statusLayer.beginFill(0xffaa00, fireAlpha * 0.5 * (1 - i * 0.15));
+                statusLayer.drawCircle(fx, fy - 2, fr * 0.6);
+                statusLayer.endFill();
+            }
+        }
+
+        // --- 眩晕效果: 头顶星星 ---
+        if (physStun > 0) {
+            var starAlpha = Math.min(0.8, physStun * 0.4);
+            for (i in 0...3) {
+                var angle = animTime * 2 + i * (Math.PI * 2 / 3);
+                var sx = Math.cos(angle) * 12;
+                var sy = -60 + Math.sin(angle) * 5;
+                // 绘制小星星(十字光)
+                statusLayer.lineStyle(2, 0xffee44, starAlpha);
+                statusLayer.moveTo(sx - 4, sy);
+                statusLayer.lineTo(sx + 4, sy);
+                statusLayer.moveTo(sx, sy - 4);
+                statusLayer.lineTo(sx, sy + 4);
+                statusLayer.beginFill(0xffee44, starAlpha * 0.5);
+                statusLayer.drawCircle(sx, sy, 2);
+                statusLayer.endFill();
+            }
+        }
+
+        // --- 减速效果: 脚下减速光环 ---
+        if (physSlow > 0 && physSlowFactor < 1.0) {
+            var slowAlpha = (1.0 - physSlowFactor) * 0.4;
+            statusLayer.beginFill(0x8866ff, slowAlpha);
+            statusLayer.drawCircle(0, 10, 22);
+            statusLayer.endFill();
+            // 减速波纹
+            for (i in 0...2) {
+                var r = 18 + ((animTime * 20 + i * 15) % 20);
+                var a = slowAlpha * (1 - (r - 18) / 20);
+                statusLayer.lineStyle(1.5, 0xaa88ff, a);
+                statusLayer.drawCircle(0, 10, r);
+            }
+        }
+
+        // --- 护体灵光: 旋转护盾环 ---
+        if (physShieldActive && physShieldStrength > 0) {
+            var shieldRatio = physShieldMax > 0 ? physShieldStrength / physShieldMax : 1;
+            var shieldAlpha = 0.3 + shieldRatio * 0.4;
+            // 内层护盾
+            shieldLayer.beginFill(0x44aaff, shieldAlpha * 0.15);
+            shieldLayer.drawCircle(0, -10, 32);
+            shieldLayer.endFill();
+            // 旋转护盾环(六边形)
+            var rot = animTime * 1.5;
+            shieldLayer.lineStyle(2, 0x66ddff, shieldAlpha);
+            for (i in 0...6) {
+                var a1 = rot + i * Math.PI / 3;
+                var a2 = rot + (i + 1) * Math.PI / 3;
+                var r = 30;
+                shieldLayer.moveTo(Math.cos(a1) * r, Math.sin(a1) * r - 10);
+                shieldLayer.lineTo(Math.cos(a2) * r, Math.sin(a2) * r - 10);
+            }
+            // 护盾碎片(强度低时出现裂纹)
+            if (shieldRatio < 0.5) {
+                shieldLayer.lineStyle(1, 0xff4444, 0.5);
+                shieldLayer.moveTo(-15, -20);
+                shieldLayer.lineTo(10, 5);
+                shieldLayer.moveTo(12, -25);
+                shieldLayer.lineTo(-8, 0);
+            }
+        }
+
+        // --- 灵压可视化: 脚下扩散波纹 ---
+        if (physPressure > 10) {
+            var pressureAlpha = Math.min(0.4, physPressure / 200);
+            for (i in 0...3) {
+                var r = 25 + ((animTime * 15 + i * 20) % 40);
+                var a = pressureAlpha * (1 - (r - 25) / 40);
+                pressureLayer.lineStyle(2, 0xffaa00, a);
+                pressureLayer.drawCircle(0, 10, r);
+            }
+            // 灵压核心光晕
+            pressureLayer.beginFill(0xff8800, pressureAlpha * 0.3);
+            pressureLayer.drawCircle(0, -10, 28);
+            pressureLayer.endFill();
+        }
+
+        // --- 元素共振光环 ---
+        if (physResonanceStrength > 0 && physResonanceBonus > 1.0) {
+            var resAlpha = Math.min(0.5, (physResonanceBonus - 1.0) * 3);
+            var pulse = 1.0 + Math.sin(animTime * 4) * 0.1;
+            // 共振光环
+            resonanceLayer.beginFill(physResonanceColor, resAlpha * 0.2);
+            resonanceLayer.drawCircle(0, -10, 35 * pulse);
+            resonanceLayer.endFill();
+            // 共振粒子(4个旋转光点)
+            for (i in 0...4) {
+                var angle = animTime * 2 + i * (Math.PI / 2);
+                var px = Math.cos(angle) * 30 * pulse;
+                var py = Math.sin(angle) * 30 * pulse - 10;
+                resonanceLayer.beginFill(physResonanceColor, resAlpha);
+                resonanceLayer.drawCircle(px, py, 3);
+                resonanceLayer.endFill();
+            }
+        } else if (physResonanceStrength < 0) {
+            // 元素压制: 暗色压制光环
+            var supAlpha = Math.min(0.4, (1.0 - physResonanceBonus) * 3);
+            resonanceLayer.beginFill(0x666666, supAlpha * 0.3);
+            resonanceLayer.drawCircle(0, -10, 30);
+            resonanceLayer.endFill();
+        }
+
+        // --- 御剑飞行: 脚下飞剑光环 ---
+        if (physIsFlying) {
+            var flyAlpha = 0.4 + Math.sin(animTime * 5) * 0.15;
+            // 飞行光晕
+            flightLayer.beginFill(0x88ddff, flyAlpha * 0.2);
+            flightLayer.drawEllipse(0, 15, 30, 8);
+            flightLayer.endFill();
+            // 飞行尾迹粒子
+            for (i in 0...4) {
+                var px = (Math.random() - 0.5) * 25;
+                var py = 12 + Math.random() * 8;
+                flightLayer.beginFill(0xaaeeff, flyAlpha * (1 - i * 0.2));
+                flightLayer.drawCircle(px, py, 2 + Math.random() * 2);
+                flightLayer.endFill();
+            }
+            // 飞行高度偏移(微微浮空)
+            this.yOffset = -3 + Math.sin(animTime * 3) * 2;
+        } else {
+            this.yOffset = 0;
+        }
+    }
+
+    // yOffset 属性(用于飞行时微微浮空)
+    public var yOffset:Float = 0;
 }

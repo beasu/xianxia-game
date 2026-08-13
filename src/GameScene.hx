@@ -109,6 +109,7 @@ class GameScene extends Scene {
     var uiFormationButtons:Array<Button> = [];
     var uiSpeedButtons:Array<Button> = []; // 时间速度按钮
     var uiActiveEvent:Label;         // 当前进行中的世界事件
+    var uiStatusInfo:Label;          // 物理状态/天气/昼夜信息条
 
     // --- Tab 按钮的 Heaps 原生 Interactive (绕过 HaxeUI 事件系统) ---
     var tabInteractives:Array<h2d.Interactive> = [];
@@ -179,6 +180,18 @@ class GameScene extends Scene {
     var targetingMaxTime:Float = 3.0;     // 瞄准模式最大持续时间
     var targetingIndicator:h2d.Graphics;  // 瞄准指示器(范围圈)
 
+    // --- 天气视觉层 ---
+    var weatherOverlay:h2d.Graphics;      // 天气覆盖层(挂在 uiLayer 下, 固定屏幕)
+    var weatherParticles:Array<{x:Float, y:Float, vx:Float, vy:Float, type:String, life:Float}> = [];
+    var weatherFlash:Float = 0;           // 雷暴闪光计时
+
+    // --- 昼夜光照层 ---
+    var dayNightOverlay:h2d.Bitmap;       // 昼夜暗化覆盖层
+    var dayNightAlpha:Float = 0;          // 当前暗化透明度(0=白天, 0.6=夜晚)
+
+    // --- 物理状态信息(供 UI 显示) ---
+    var playerPhysStatus:String = "";     // 玩家物理状态摘要
+
     // --- 玩家引用(渲染对象) ---
     public var player:Cultivator;
     public var playerEntity:Entity;
@@ -233,6 +246,17 @@ class GameScene extends Scene {
 
         // UI 层直接挂在 Scene 下, 不受镜头移动影响
         uiLayer = new Object(this);
+
+        // 天气覆盖层(固定在屏幕上, 不随镜头移动)
+        weatherOverlay = new h2d.Graphics(uiLayer);
+
+        // 昼夜光照覆盖层(全屏暗化)
+        var dnTile = h2d.Tile.fromColor(0x000033, 1, 1);
+        dayNightOverlay = new h2d.Bitmap(dnTile, uiLayer);
+        dayNightOverlay.scaleX = 3000;
+        dayNightOverlay.scaleY = 3000;
+        dayNightOverlay.alpha = 0;
+        dayNightOverlay.blendMode = Multiply;
     }
 
     // ============================================================
@@ -757,6 +781,17 @@ class GameScene extends Scene {
         uiActiveEvent.width = 360;
         uiActiveEvent.height = 24;
         Screen.instance.addComponent(uiActiveEvent);
+
+        // === 物理状态/天气/昼夜 信息条 ===
+        uiStatusInfo = new Label();
+        uiStatusInfo.text = "";
+        uiStatusInfo.styleString = "font-size:14px;color:#aaccff;background-color:#0a0a1aee;border:1px solid #336699;border-radius:4px;padding:4px 8px;";
+        uiStatusInfo.left = 8;
+        uiStatusInfo.top = height - 180;
+        uiStatusInfo.width = 420;
+        uiStatusInfo.height = 20;
+        uiStatusInfo.visible = false;
+        Screen.instance.addComponent(uiStatusInfo);
 
         // === NPC 详情浮窗(点击 NPC 弹出, 初始隐藏) ===
         npcDetailPanel = new VBox();
@@ -1890,6 +1925,9 @@ class GameScene extends Scene {
 
         updateUI(dt);
         updateSkillCooldowns();
+        updateWeatherVisual(dt);
+        updateDayNightVisual(dt);
+        updateVeinAirflowVisual(dt);
 
         super.sync(ctx);
     }
@@ -1926,13 +1964,32 @@ class GameScene extends Scene {
             var c = renderMap[e.id];
             if (c == null) continue;
 
-            // 同步位置
+            // 同步位置(考虑飞行浮空偏移)
             c.x = pos.x;
             c.y = pos.y;
 
             // 同步 HP
             var ratio = Math.max(0, cult.hp / cult.maxHp);
             c.updateHpBar(ratio);
+
+            // 同步物理状态到渲染对象
+            var sp = e.get(SpiritPhysicsComp);
+            if (sp != null) {
+                c.physFrozen = sp.frozenTimer;
+                c.physBurn = sp.burnTimer;
+                c.physStun = sp.stunTimer;
+                c.physSlow = sp.slowTimer;
+                c.physSlowFactor = sp.slowFactor;
+                c.physShieldActive = sp.shieldActive;
+                c.physShieldStrength = sp.shieldStrength;
+                c.physShieldMax = sp.shieldMaxStrength;
+                c.physIsFlying = sp.isFlying;
+                c.physPressure = sp.spiritPressure * (cult.hp / cult.maxHp);
+                c.physResonanceStrength = sp.resonanceStrength;
+                c.physResonanceBonus = sp.resonanceBonus;
+                // 共振颜色匹配灵根
+                c.physResonanceColor = cult.getRootColor();
+            }
 
             // 更新动画
             c.updateAnimation(0.016);
@@ -1946,6 +2003,24 @@ class GameScene extends Scene {
                 player.x = pos.x;
                 player.y = pos.y;
                 player.syncFromComp(pos, cult);
+
+                // 玩家也同步物理状态
+                var sp = playerEntity.get(SpiritPhysicsComp);
+                if (sp != null) {
+                    player.physFrozen = sp.frozenTimer;
+                    player.physBurn = sp.burnTimer;
+                    player.physStun = sp.stunTimer;
+                    player.physSlow = sp.slowTimer;
+                    player.physSlowFactor = sp.slowFactor;
+                    player.physShieldActive = sp.shieldActive;
+                    player.physShieldStrength = sp.shieldStrength;
+                    player.physShieldMax = sp.shieldMaxStrength;
+                    player.physIsFlying = sp.isFlying;
+                    player.physPressure = sp.spiritPressure * (cult.hp / cult.maxHp);
+                    player.physResonanceStrength = sp.resonanceStrength;
+                    player.physResonanceBonus = sp.resonanceBonus;
+                    player.physResonanceColor = cult.getRootColor();
+                }
             }
         }
     }
@@ -2145,6 +2220,54 @@ class GameScene extends Scene {
 
         // === 实时更新 NPC 详情浮窗(如果打开) ===
         if (!npcDetailPanel.hidden) updateNpcDetail();
+
+        // === 物理状态 / 天气 / 昼夜 信息条 ===
+        var physInfo = "";
+
+        // 玩家物理状态
+        var physComp = playerEntity.get(SpiritPhysicsComp);
+        if (physComp != null) {
+            var statuses:Array<String> = [];
+            if (physComp.frozenTimer > 0) statuses.push("❄冰冻");
+            if (physComp.burnTimer > 0) statuses.push("🔥燃烧");
+            if (physComp.stunTimer > 0) statuses.push("💫眩晕");
+            if (physComp.slowTimer > 0) statuses.push("🐌减速");
+            if (physComp.shieldActive) statuses.push("🛡护体灵光(" + Math.round(physComp.shieldStrength) + ")");
+            if (physComp.isFlying) statuses.push("🦅御剑飞行");
+            if (statuses.length > 0) physInfo += "状态: " + statuses.join(" ") + "  ";
+        }
+
+        // 天气
+        var weatherSys2:WeatherSystem = null;
+        for (s in engine.systems) {
+            var ws2 = Std.downcast(s, WeatherSystem);
+            if (ws2 != null) { weatherSys2 = ws2; break; }
+        }
+        if (weatherSys2 != null && weatherSys2.state.type != "clear") {
+            var wNames:Map<String, String> = [
+                "rain" => "🌧雨", "snow" => "❄雪", "thunder" => "⛈雷暴", "fog" => "🌫雾"
+            ];
+            physInfo += "天气: " + (wNames.exists(weatherSys2.state.type) ? wNames[weatherSys2.state.type] : weatherSys2.state.type) + "  ";
+        }
+
+        // 昼夜
+        var dayNightSys2:DayNightSystem = null;
+        for (s in engine.systems) {
+            var dns2 = Std.downcast(s, DayNightSystem);
+            if (dns2 != null) { dayNightSys2 = dns2; break; }
+        }
+        if (dayNightSys2 != null) {
+            var phaseNames:Map<String, String> = [
+                "dawn" => "🌅黎明", "day" => "☀白昼", "dusk" => "🌇黄昏", "night" => "🌙夜晚"
+            ];
+            physInfo += "时辰: " + (phaseNames.exists(dayNightSys2.state.dayPhase) ? phaseNames[dayNightSys2.state.dayPhase] : dayNightSys2.state.dayPhase);
+        }
+
+        playerPhysStatus = physInfo;
+        if (uiStatusInfo != null) {
+            uiStatusInfo.text = physInfo;
+            uiStatusInfo.visible = physInfo.length > 0;
+        }
     }
 
     function updateSkillCooldowns() {
@@ -2155,6 +2278,206 @@ class GameScene extends Scene {
             var cd = cooldowns.exists(key) ? cooldowns[key] : 0;
             if (cd > 0) { btn.alpha = 0.5; btn.disabled = true; }
             else { btn.alpha = 1.0; btn.disabled = false; }
+        }
+    }
+
+    // ============================================================
+    //  天气视觉层 — 全屏雨/雪/雷暴/雾效果
+    // ============================================================
+    function updateWeatherVisual(dt:Float):Void {
+        // 获取天气系统
+        var weatherSys:WeatherSystem = null;
+        for (s in engine.systems) {
+            var ws = Std.downcast(s, WeatherSystem);
+            if (ws != null) { weatherSys = ws; break; }
+        }
+
+        weatherOverlay.clear();
+
+        if (weatherSys == null) return;
+
+        var weather = weatherSys.state.type;
+        var screenW = width;
+        var screenH = height;
+
+        switch (weather) {
+            case "rain":
+                // 雨天: 生成雨滴粒子
+                if (weatherParticles.length < 120) {
+                    for (i in 0...4) {
+                        weatherParticles.push({
+                            x: Math.random() * screenW,
+                            y: -10,
+                            vx: -30 + Math.random() * 20,
+                            vy: 400 + Math.random() * 200,
+                            type: "rain",
+                            life: 2
+                        });
+                    }
+                }
+                // 全屏微蓝
+                weatherOverlay.beginFill(0x223366, 0.08);
+                weatherOverlay.drawRect(0, 0, screenW, screenH);
+                weatherOverlay.endFill();
+
+            case "snow":
+                // 雪天: 生成雪花粒子
+                if (weatherParticles.length < 80) {
+                    for (i in 0...2) {
+                        weatherParticles.push({
+                            x: Math.random() * screenW,
+                            y: -10,
+                            vx: -15 + Math.random() * 30,
+                            vy: 50 + Math.random() * 60,
+                            type: "snow",
+                            life: 5
+                        });
+                    }
+                }
+                // 全屏微白
+                weatherOverlay.beginFill(0xddddff, 0.06);
+                weatherOverlay.drawRect(0, 0, screenW, screenH);
+                weatherOverlay.endFill();
+
+            case "thunder":
+                // 雷暴: 雨滴 + 随机闪光
+                if (weatherParticles.length < 150) {
+                    for (i in 0...5) {
+                        weatherParticles.push({
+                            x: Math.random() * screenW,
+                            y: -10,
+                            vx: -40 + Math.random() * 20,
+                            vy: 500 + Math.random() * 200,
+                            type: "rain",
+                            life: 2
+                        });
+                    }
+                }
+                // 闪光效果
+                weatherFlash -= dt;
+                if (weatherFlash <= 0 && Math.random() < 0.02) {
+                    weatherFlash = 0.15;
+                }
+                if (weatherFlash > 0) {
+                    weatherOverlay.beginFill(0xffffff, weatherFlash * 2);
+                    weatherOverlay.drawRect(0, 0, screenW, screenH);
+                    weatherOverlay.endFill();
+                }
+                // 暗紫色底色
+                weatherOverlay.beginFill(0x332244, 0.12);
+                weatherOverlay.drawRect(0, 0, screenW, screenH);
+                weatherOverlay.endFill();
+
+            case "fog":
+                // 雾天: 飘动雾气
+                if (weatherParticles.length < 40) {
+                    weatherParticles.push({
+                        x: Math.random() * screenW,
+                        y: Math.random() * screenH,
+                        vx: 10 + Math.random() * 20,
+                        vy: -2 + Math.random() * 4,
+                        type: "fog",
+                        life: 8
+                    });
+                }
+                // 全屏灰白
+                weatherOverlay.beginFill(0xaaaaaa, 0.12);
+                weatherOverlay.drawRect(0, 0, screenW, screenH);
+                weatherOverlay.endFill();
+
+            case "clear":
+                // 晴天: 无覆盖
+        }
+
+        // 更新和绘制天气粒子
+        var i = weatherParticles.length;
+        while (i-- > 0) {
+            var p = weatherParticles[i];
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.life -= dt;
+
+            if (p.y > screenH + 10 || p.x < -20 || p.x > screenW + 20 || p.life <= 0) {
+                weatherParticles.splice(i, 1);
+                continue;
+            }
+
+            switch (p.type) {
+                case "rain":
+                    weatherOverlay.lineStyle(1.5, 0x88aacc, 0.5);
+                    weatherOverlay.moveTo(p.x, p.y);
+                    weatherOverlay.lineTo(p.x - p.vx * 0.02, p.y - p.vy * 0.02);
+                case "snow":
+                    weatherOverlay.beginFill(0xffffff, 0.7);
+                    weatherOverlay.drawCircle(p.x, p.y, 2 + Math.sin(p.life * 5) * 0.5);
+                    weatherOverlay.endFill();
+                case "fog":
+                    weatherOverlay.beginFill(0xcccccc, 0.06);
+                    weatherOverlay.drawCircle(p.x, p.y, 30 + Math.sin(p.life * 2) * 10);
+                    weatherOverlay.endFill();
+            }
+        }
+    }
+
+    // ============================================================
+    //  昼夜光照层 — 夜晚暗化 + 黎明黄昏渐变
+    // ============================================================
+    function updateDayNightVisual(dt:Float):Void {
+        // 获取昼夜系统
+        var dayNightSys:DayNightSystem = null;
+        for (s in engine.systems) {
+            var dns = Std.downcast(s, DayNightSystem);
+            if (dns != null) { dayNightSys = dns; break; }
+        }
+
+        if (dayNightSys == null || dayNightOverlay == null) return;
+
+        var targetAlpha = dayNightSys.state.darkness;
+        // 平滑过渡
+        dayNightAlpha += (targetAlpha - dayNightAlpha) * dt * 2;
+        dayNightOverlay.alpha = dayNightAlpha;
+
+        // 根据阶段调整颜色
+        var color = switch (dayNightSys.state.dayPhase) {
+            case "dawn":  0x442233;   // 黎明: 微红
+            case "day":   0x000033;   // 白天: 几乎无
+            case "dusk":  0x332244;   // 黄昏: 微紫
+            case "night": 0x000022;   // 夜晚: 深蓝
+            default:      0x000033;
+        };
+        // 重新创建颜色 tile
+        if (dayNightAlpha > 0.01) {
+            dayNightOverlay.tile = h2d.Tile.fromColor(color, 1, 1);
+        }
+    }
+
+    // ============================================================
+    //  灵脉气流粒子可视化
+    // ============================================================
+    function updateVeinAirflowVisual(dt:Float):Void {
+        // 在每个灵脉位置偶尔生成上升气流粒子
+        for (vein in engine.spiritVeins) {
+            if (vein.currentDensity < 0.5) continue;
+            if (Math.random() < vein.currentDensity * dt * 2) {
+                var px = vein.x + (Math.random() - 0.5) * 100;
+                var py = vein.y + (Math.random() - 0.5) * 100;
+                // 只在镜头范围内生成
+                if (px < camX - 50 || px > camX + viewW + 50) continue;
+                if (py < camY - 50 || py > camY + viewH + 50) continue;
+
+                var p = getParticle();
+                if (p == null) continue;
+                p.x = px;
+                p.y = py;
+                p.vx = (Math.random() - 0.5) * 10;
+                p.vy = -20 - Math.random() * 30;
+                p.life = 2;
+                p.maxLife = 2;
+                p.size = 2 + Math.random() * 2;
+                p.color = 0x88ffaa;
+                p.alpha = 0.4;
+                p.gravity = 0;
+            }
         }
     }
 
