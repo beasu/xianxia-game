@@ -20,7 +20,7 @@ class WorldEngine {
     public var tickCount:Int = 0;        // 总 Tick 数
     public var worldDay:Int = 1;         // 世界日
     public var worldYear:Int = 1;        // 世界年
-    public var ticksPerDay:Int = 100;    // 每天多少 Tick
+    public var ticksPerDay:Int = 3600;    // 每天多少 Tick (6分钟/天)
     public var daysPerYear:Int = 360;    // 每年多少天
 
     // --- 实体管理 ---

@@ -2010,6 +2010,7 @@ class GameScene extends Scene {
                 c.physResonanceBonus = sp.resonanceBonus;
                 // 共振颜色匹配灵根
                 c.physResonanceColor = cult.getRootColor();
+                c.nightDarkness = dayNightAlpha;
             }
 
             // 更新动画
@@ -2037,6 +2038,7 @@ class GameScene extends Scene {
                     player.physShieldStrength = sp.shieldStrength;
                     player.physShieldMax = sp.shieldMaxStrength;
                     player.physIsFlying = sp.isFlying;
+                    player.nightDarkness = dayNightAlpha;
                     player.physPressure = sp.spiritPressure * (cult.hp / cult.maxHp);
                     player.physResonanceStrength = sp.resonanceStrength;
                     player.physResonanceBonus = sp.resonanceBonus;

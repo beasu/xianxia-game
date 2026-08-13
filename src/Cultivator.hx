@@ -161,6 +161,7 @@ class Cultivator extends Object {
     public var pressureLayer:Graphics;    // 灵压可视化层
     public var resonanceLayer:Graphics;   // 元素共振光环层
     public var flightLayer:Graphics;      // 御剑飞行光环层
+    public var nightGlowLayer:Graphics;   // 夜间灵力辉光层
 
     // 物理状态值(由 GameScene.syncRender 每帧同步)
     public var physFrozen:Float = 0;
@@ -176,6 +177,7 @@ class Cultivator extends Object {
     public var physResonanceStrength:Float = 0;
     public var physResonanceBonus:Float = 1.0;
     public var physResonanceColor:Int = 0xffffff;
+    public var nightDarkness:Float = 0;       // 当前夜晚暗度(由GameScene同步)
 
     var animTime:Float = 0;
     var facingRight:Bool = true;
@@ -209,6 +211,7 @@ class Cultivator extends Object {
         shieldLayer = new Graphics(this);
         flightLayer = new Graphics(this);
         statusLayer = new Graphics(this);
+        nightGlowLayer = new Graphics(this);
 
         var bgTile = Tile.fromColor(0x000000, 80, 6);
         hpBarBg = new Bitmap(bgTile, this);
@@ -927,6 +930,7 @@ class Cultivator extends Object {
         if (pressureLayer != null) pressureLayer.clear();
         if (resonanceLayer != null) resonanceLayer.clear();
         if (flightLayer != null) flightLayer.clear();
+        if (nightGlowLayer != null) nightGlowLayer.clear();
 
         // --- 冰冻效果: 蓝色冰晶覆盖 ---
         if (physFrozen > 0) {
@@ -1071,25 +1075,42 @@ class Cultivator extends Object {
             resonanceLayer.endFill();
         }
 
-        // --- 御剑飞行: 脚下飞剑光环 ---
-        if (physIsFlying) {
-            var flyAlpha = 0.4 + Math.sin(animTime * 5) * 0.15;
-            // 飞行光晕
-            flightLayer.beginFill(0x88ddff, flyAlpha * 0.2);
-            flightLayer.drawEllipse(0, 15, 30, 8);
-            flightLayer.endFill();
-            // 飞行尾迹粒子
-            for (i in 0...4) {
-                var px = (Math.random() - 0.5) * 25;
-                var py = 12 + Math.random() * 8;
-                flightLayer.beginFill(0xaaeeff, flyAlpha * (1 - i * 0.2));
-                flightLayer.drawCircle(px, py, 2 + Math.random() * 2);
-                flightLayer.endFill();
+        // 夜间辉光: 夜晚时角色自动发光，照亮自身和周围
+        if (nightDarkness > 0.05) {
+            // 暗度越大，辉光越强(暗度0.25→辉光强度0.5)
+            var glowStrength = (nightDarkness - 0.05) / 0.2; // 0~1
+            var glowAlpha = glowStrength * 0.5;
+            var glowColor = realmList[realmIndex].color;
+
+            // 角色主体发光: 填充式光晕照亮角色轮廓
+            nightGlowLayer.beginFill(glowColor, glowAlpha * 0.25);
+            nightGlowLayer.drawCircle(0, -10, 30 * charScale);
+            nightGlowLayer.endFill();
+
+            // 内层核心亮斑
+            nightGlowLayer.beginFill(glowColor, glowAlpha * 0.6);
+            nightGlowLayer.drawCircle(0, -10, 12 * charScale);
+            nightGlowLayer.endFill();
+
+            // 头顶灵力光晕(身份标识)
+            nightGlowLayer.beginFill(0xffffee, glowAlpha * 0.4);
+            nightGlowLayer.drawCircle(0, -38 * charScale, 4);
+            nightGlowLayer.endFill();
+
+            // 周围地光(照亮脚下，范围大于角色)
+            var groundGlowR = 20 + realmIndex * 5;
+            nightGlowLayer.beginFill(glowColor, glowAlpha * 0.08);
+            nightGlowLayer.drawEllipse(0, 10, groundGlowR * charScale, groundGlowR * 0.3 * charScale);
+            nightGlowLayer.endFill();
+
+            // 境界越高光越强: 金丹期以上增加外环脉动
+            if (realmIndex >= 2) {
+                var pulseR = (40 + realmIndex * 8) * charScale;
+                var pulseA = glowAlpha * (0.1 + Math.sin(animTime * 3) * 0.05);
+                nightGlowLayer.lineStyle(2, glowColor, pulseA);
+                nightGlowLayer.drawCircle(0, -10, pulseR);
+                nightGlowLayer.lineStyle();
             }
-            // 飞行高度偏移(微微浮空)
-            this.yOffset = -3 + Math.sin(animTime * 3) * 2;
-        } else {
-            this.yOffset = 0;
         }
     }
 
